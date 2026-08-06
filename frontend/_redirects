@@ -1,2 +1,7 @@
-# 将 /api/* 请求转发到 Worker
-/api/* https://nasdaq-indicator.your-worker.workers.dev/api/:splat 200
+# Cloudflare Pages → Worker 代理规则
+# 部署 Worker 后，将 YOUR_WORKER 替换为实际的 Worker 域名
+# 例如: https://nasdaq-indicator.your-name.workers.dev
+# /api/* https://YOUR_WORKER/api/:splat 200
+
+# 如果使用 Pages Functions 作为代理，保留下面这行
+# /api/* /api/:splat 200
