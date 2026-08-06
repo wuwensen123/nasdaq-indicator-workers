@@ -134,6 +134,7 @@
                     <div class="update-time">
                         <div>数据更新时间</div>
                         <div class="value" id="updateTime">--</div>
+                        <div id="cacheIndicator" class="d-none" style="font-size:0.7rem;color:var(--blue);">⚡ 缓存数据</div>
                     </div>
                     <button class="btn-refresh" id="refreshBtn" onclick="refreshData()">
                         <span class="spinner"></span>
@@ -313,6 +314,8 @@ function renderDashboard(data) {
     if (!data || !data.success) { showError(data?.error || '未知错误'); return; }
     appState.data = data;
     document.getElementById('updateTime').textContent = formatTime(data.fetched_at);
+    const cacheIndicator = document.getElementById('cacheIndicator');
+    if (data.from_cache) { cacheIndicator.classList.remove('d-none'); } else { cacheIndicator.classList.add('d-none'); }
     renderGlobalIndicators(data.global_summary);
     if (data.analysis?.results) { renderTargets(data.analysis.results); renderFormula(data.analysis.results); }
     const footer = document.getElementById('footerInfo');
