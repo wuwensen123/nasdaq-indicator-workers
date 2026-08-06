@@ -42,6 +42,9 @@ export class Analyzer {
 
     for (const ind of cfg.indicators) {
       const r = this._score(ind, td, global, cfg);
+      const ni = this._indInfo(ind);
+      r.name = ni.name;
+      r.description = ni.desc;
       indicators.push(r);
       if (r.score != null) { weightedSum += r.score * r.weight; totalWeight += r.weight; }
     }
@@ -117,6 +120,24 @@ export class Analyzer {
       rsi: 'RSI(14)', ma200: '200日均线偏离度',
     };
     return names[k] || k;
+  }
+  _indInfo(k) {
+    const infos = {
+      vix: { name: 'VIX波动率', desc: '衡量市场恐慌程度，越高越恐慌' },
+      fear_greed: { name: '恐惧与贪婪指数', desc: '市场情绪，越高越贪婪' },
+      put_call: { name: '看跌/看涨期权比率', desc: '期权市场情绪，越低越乐观' },
+      yield_10y: { name: '10年期国债收益率', desc: '无风险利率，越高越紧缩' },
+      dxy: { name: '美元指数DXY', desc: '美元强弱，越强越不利于风险资产' },
+      pe_qqq: { name: '纳斯达克100市盈率', desc: '估值水平，越高越贵' },
+      pe_sp500: { name: '标普500市盈率', desc: '估值水平，越高越贵' },
+      pe_hsi: { name: '恒生指数市盈率', desc: '估值水平，越高越贵' },
+      pe_shanghai: { name: '上证指数市盈率', desc: 'A股整体估值水平' },
+      pe_csi300: { name: '沪深300市盈率', desc: '大盘股估值水平' },
+      pe_stock: { name: '个股市盈率', desc: '个股估值水平' },
+      rsi: { name: 'RSI(14)相对强弱指标', desc: '技术指标，越高越超买' },
+      ma200: { name: '200日均线偏离度', desc: '价格相对于200日均线的位置' },
+    };
+    return infos[k] || { name: k, desc: '' };
   }
 }
 

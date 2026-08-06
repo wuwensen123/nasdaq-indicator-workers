@@ -12,7 +12,7 @@
             --bg-card-hover: #1c2333;
             --border-color: #30363d;
             --text-primary: #e6edf3;
-            --text-secondary: #8b949e;
+            --text-secondary: #c9d1d9;
             --green: #3fb950;
             --yellow: #d29922;
             --red: #f85149;
@@ -40,7 +40,7 @@
         }
         .header .subtitle { color: #c9d1d9; font-size: 0.9rem; margin-top: 4px; }
         .header-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-        .update-time { color: var(--text-secondary); font-size: 0.85rem; }
+        .update-time { color: var(--text-primary); font-size: 0.85rem; }
         .update-time .value { color: var(--blue); }
         .btn-refresh {
             background: linear-gradient(135deg, #238636, #2ea043); border: none; color: white;
@@ -59,7 +59,7 @@
         .card-body { padding: 16px; }
         .global-indicator { text-align: center; padding: 16px; }
         .global-indicator .value { font-size: 1.8rem; font-weight: 700; margin: 8px 0; color: var(--text-primary); }
-        .global-indicator .label { color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px; }
+        .global-indicator .label { color: var(--text-primary); font-size: 0.85rem; margin-bottom: 4px; }
         .global-indicator .change { font-size: 0.85rem; }
         .change.up { color: var(--green); }
         .change.down { color: var(--red); }
@@ -69,11 +69,11 @@
         .score-gauge-container canvas { width: 100% !important; height: 100% !important; }
         .score-value { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
         .score-value .number { font-size: 2.5rem; font-weight: 800; line-height: 1; }
-        .score-value .unit { font-size: 0.85rem; color: var(--text-secondary); }
+        .score-value .unit { font-size: 0.85rem; color: var(--text-primary); }
         .score-label { font-size: 1.1rem; font-weight: 600; margin-top: 12px; }
         .strategy-box { background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px; margin-top: 16px; text-align: center; }
         .strategy-box .action { font-size: 1.5rem; font-weight: 700; margin-bottom: 8px; }
-        .strategy-box .description { color: var(--text-secondary); font-size: 0.9rem; }
+        .strategy-box .description { color: var(--text-primary); font-size: 0.9rem; }
         .target-card { position: relative; overflow: hidden; }
         .target-card .price { font-size: 1.2rem; font-weight: 600; color: var(--text-primary); }
         .target-card .score-bar { height: 6px; border-radius: 3px; margin: 12px 0; background: var(--border-color); position: relative; overflow: hidden; }
@@ -82,17 +82,17 @@
         .target-card .strategy-tag { display: inline-block; padding: 4px 14px; border-radius: 20px; font-weight: 600; font-size: 0.9rem; margin-top: 8px; }
         .indicator-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-color); }
         .indicator-item:last-child { border-bottom: none; }
-        .indicator-item .indicator-name { font-size: 0.9rem; color: var(--text-secondary); }
+        .indicator-item .indicator-name { font-size: 0.9rem; color: var(--text-primary); }
         .indicator-item .indicator-score { display: flex; align-items: center; gap: 12px; }
         .indicator-item .indicator-score .score-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-        .indicator-item .indicator-value { font-size: 0.8rem; color: var(--text-secondary); min-width: 50px; text-align: right; }
+        .indicator-item .indicator-value { font-size: 0.8rem; color: var(--text-primary); min-width: 50px; text-align: right; }
         .nav-tabs { border-bottom: 1px solid var(--border-color); }
-        .nav-tabs .nav-link { color: var(--text-secondary); border: none; padding: 10px 16px; font-size: 0.9rem; }
+        .nav-tabs .nav-link { color: var(--text-primary); border: none; padding: 10px 16px; font-size: 0.9rem; }
         .nav-tabs .nav-link:hover { color: var(--text-primary); border: none; }
         .nav-tabs .nav-link.active { color: var(--blue); background: transparent; border-bottom: 2px solid var(--blue); }
         .formula-box { background: rgba(88, 166, 255, 0.05); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: 8px; padding: 12px 16px; margin-top: 12px; }
         .formula-box .formula-text { font-family: 'Courier New', monospace; font-size: 0.85rem; color: var(--blue); }
-        .formula-box .formula-detail { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+        .formula-box .formula-detail { font-size: 0.8rem; color: var(--text-primary); }
         .loading-overlay { display: flex; align-items: center; justify-content: center; min-height: 400px; }
         .loading-spinner { width: 48px; height: 48px; border: 3px solid var(--border-color); border-top-color: var(--blue); border-radius: 50%; animation: spin 1s linear infinite; }
         .error-message { background: rgba(248, 81, 73, 0.1); border: 1px solid rgba(248, 81, 73, 0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--red); }
@@ -106,12 +106,13 @@
         .fade-in { animation: fadeIn 0.5s ease; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .section-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }
-        .data-source { font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; }
-        .fetch-time { color: var(--text-secondary); font-size: 0.8rem; }
+        .data-source { font-size: 0.75rem; color: var(--text-primary); margin-top: 4px; }
+        .fetch-time { color: var(--text-primary); font-size: 0.8rem; }
         .api-url-bar { margin-top: 8px; display: flex; gap: 8px; align-items: center; }
         .api-url-bar input { background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 12px; color: var(--text-primary); font-size: 0.8rem; width: 300px; }
-        .api-url-bar button { background: transparent; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-secondary); padding: 4px 12px; cursor: pointer; font-size: 0.8rem; }
+        .api-url-bar button { background: transparent; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 4px 12px; cursor: pointer; font-size: 0.8rem; }
         .api-url-bar button:hover { border-color: var(--blue); color: var(--blue); }
+        .text-secondary { color: var(--text-primary) !important; }
     </style>
 </head>
 <body>
@@ -123,7 +124,7 @@
                 <h1>📊 纳斯达克100 买入卖出指标仪表盘</h1>
                 <div class="subtitle">基于多维度市场指标的智能定投决策系统</div>
                 <div class="api-url-bar">
-                    <span style="color:var(--text-secondary);font-size:0.8rem;">API:</span>
+                    <span style="color:var(--text-primary);font-size:0.8rem;">API:</span>
                     <input type="text" id="apiUrlInput" value="https://nasdaq-indicator.morisze.workers.dev/api" placeholder="Worker URL">
                     <button onclick="updateApiUrl()">更新</button>
                 </div>
@@ -330,12 +331,12 @@ function showTargetDetail(targetId) {
     const indicatorsHtml = target.indicators.map(ind => {
         const indScore = ind.score, indColor = getScoreColor(indScore);
         const displayValue = ind.value !== null && ind.value !== undefined ? formatNumber(ind.value) + (ind.unit || '') : '--';
-        return `<div class="indicator-item"><div><div class="indicator-name">${ind.name}</div><div style="font-size:0.75rem;color:var(--text-secondary);">${ind.description || ''}</div></div><div class="indicator-score"><div class="indicator-value">${displayValue}</div><div><span class="score-dot" style="background:${indColor}"></span> <span style="font-size:0.85rem;font-weight:600;color:${indColor}">${indScore !== null ? indScore : '--'}</span></div><div style="font-size:0.75rem;color:var(--text-secondary);min-width:35px;text-align:right;">${ind.label}</div></div></div>`;
+        return `<div class="indicator-item"><div><div class="indicator-name">${ind.name}</div><div style="font-size:0.75rem;color:var(--text-primary);">${ind.description || ''}</div></div><div class="indicator-score"><div class="indicator-value">${displayValue}</div><div><span class="score-dot" style="background:${indColor}"></span> <span style="font-size:0.85rem;font-weight:600;color:${indColor}">${indScore !== null ? indScore : '--'}</span></div><div style="font-size:0.75rem;color:var(--text-primary);min-width:35px;text-align:right;">${ind.label}</div></div></div>`;
     }).join('');
 
     const existingModal = document.getElementById('targetModal');
     if (existingModal) existingModal.remove();
-    document.body.insertAdjacentHTML('beforeend', `<div class="modal fade" id="targetModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content" style="background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border-color);"><div class="modal-header" style="border-bottom:1px solid var(--border-color);"><h5 class="modal-title">${target.target_name}</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row mb-4"><div class="col-md-4 text-center"><div style="position:relative;width:140px;height:140px;margin:0 auto;"><canvas id="modalGauge"></canvas><div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;"><div style="font-size:2rem;font-weight:800;color:${scoreColor};">${score !== null ? score : '?'}</div><div style="font-size:0.75rem;color:var(--text-secondary);">/ 100</div></div></div><div style="margin-top:8px;"><span class="status-badge" style="background:${target.position_color}22;color:${target.position_color};font-size:1rem;">${target.market_position}</span></div></div><div class="col-md-8"><div class="strategy-box" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-color);"><div style="color:var(--text-secondary);font-size:0.85rem;">建议策略</div><div class="action" style="color:${getStrategyColor(target.strategy?.action)};">${target.strategy?.icon || ''} ${target.strategy?.action || '--'}</div><div class="description">${target.strategy?.description || ''}</div><div class="mt-2"><span style="font-size:0.85rem;">当前价格: </span><span style="font-size:1.1rem;font-weight:600;">${target.current_price ? formatNumber(target.current_price) : '--'}</span></div></div></div></div><h6 style="color:var(--text-secondary);margin-bottom:12px;">指标详情</h6>${indicatorsHtml}<div class="formula-box mt-3"><div class="formula-text">${target.formula}</div><div class="formula-detail">${target.formula_detail}</div></div></div></div></div></div>`);
+    document.body.insertAdjacentHTML('beforeend', `<div class="modal fade" id="targetModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content" style="background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border-color);"><div class="modal-header" style="border-bottom:1px solid var(--border-color);"><h5 class="modal-title">${target.target_name}</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row mb-4"><div class="col-md-4 text-center"><div style="position:relative;width:140px;height:140px;margin:0 auto;"><canvas id="modalGauge"></canvas><div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;"><div style="font-size:2rem;font-weight:800;color:${scoreColor};">${score !== null ? score : '?'}</div><div style="font-size:0.75rem;color:var(--text-primary);">/ 100</div></div></div><div style="margin-top:8px;"><span class="status-badge" style="background:${target.position_color}22;color:${target.position_color};font-size:1rem;">${target.market_position}</span></div></div><div class="col-md-8"><div class="strategy-box" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-color);"><div style="color:var(--text-primary);font-size:0.85rem;">建议策略</div><div class="action" style="color:${getStrategyColor(target.strategy?.action)};">${target.strategy?.icon || ''} ${target.strategy?.action || '--'}</div><div class="description">${target.strategy?.description || ''}</div><div class="mt-2"><span style="font-size:0.85rem;">当前价格: </span><span style="font-size:1.1rem;font-weight:600;">${target.current_price ? formatNumber(target.current_price) : '--'}</span></div></div></div></div><h6 style="color:var(--text-primary);margin-bottom:12px;">指标详情</h6>${indicatorsHtml}<div class="formula-box mt-3"><div class="formula-text">${target.formula}</div><div class="formula-detail">${target.formula_detail}</div></div></div></div></div></div>`);
     const modal = new bootstrap.Modal(document.getElementById('targetModal'));
     modal.show();
     document.getElementById('targetModal').addEventListener('shown.bs.modal', function() { setTimeout(() => createGauge('modalGauge', score), 100); });
