@@ -76,8 +76,8 @@ export class Analyzer {
       'pe_qqq': () => { const v = td.pe_ratio ?? g.shiller_pe?.value; const s = normPE(v, cfg.pe_normal || 25); return { ...s, value: v }; },
       'pe_sp500': () => { const v = td.pe_ratio ?? g.shiller_pe?.value; const s = normPE(v, cfg.pe_normal || 22); return { ...s, value: v }; },
       'pe_hsi': () => { const v = td.pe_ratio; const s = normPE_HSI(v); return { ...s, value: v }; },
-      'pe_shanghai': () => { const v = td.pe_ratio; const s = normPE_Shanghai(v); return { ...s, value: v }; },
-      'pe_csi300': () => { const v = td.pe_ratio; const s = normPE_CSI300(v); return { ...s, value: v }; },
+      'pe_shanghai': () => { const v = g.cn_market?.shanghai_pe ?? td.pe_ratio; const s = normPE_Shanghai(v); return { ...s, value: v }; },
+      'pe_csi300': () => { const v = g.cn_market?.csi300_pe ?? td.pe_ratio; const s = normPE_CSI300(v); return { ...s, value: v }; },
       'pe_stock': () => { const v = td.pe_ratio; const s = normPE_Stock(v); return { ...s, value: v }; },
     };
 

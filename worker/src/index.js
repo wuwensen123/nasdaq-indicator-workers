@@ -76,14 +76,16 @@ async function fetchFreshData() {
   const start = Date.now();
   const targets = analyzer.getTargets();
 
-  const [vix, fearGreed, treasury, putCall, dxy, shillerPE] = await Promise.all([
+  const [vix, fearGreed, treasury, putCall, dxy, shillerPE, cnPE] = await Promise.all([
     fetcher.getVIX(), fetcher.getFearGreed(), fetcher.getTreasuryYield(),
     fetcher.getPutCallRatio(), fetcher.getDXY(), fetcher.getShillerPE(),
+    fetcher.getChinaIndexPE(),
   ]);
 
   const globalData = {
     vix, fear_greed: fearGreed, treasury_10y: treasury,
     put_call_ratio: putCall, dxy, shiller_pe: shillerPE,
+    cn_market: cnPE,
     updated_at: new Date().toISOString(),
   };
 
@@ -125,11 +127,6 @@ async function fetchFreshData() {
 }
 
 export default {
-  // 初始化
-  async start(env) {
-    await initDB(env);
-  },
-
   // HTTP 请求处理
   async fetch(request, env, ctx) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });

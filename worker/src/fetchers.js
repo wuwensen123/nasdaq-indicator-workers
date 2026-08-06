@@ -10,6 +10,12 @@ async function fetchJSON(url) {
   return res.json();
 }
 
+async function fetchJSONWithHeaders(url, extraHeaders = {}) {
+  const res = await fetch(url, { headers: { 'User-Agent': UA, ...extraHeaders } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
+  return res.json();
+}
+
 async function fetchText(url) {
   const res = await fetch(url, { headers: { 'User-Agent': UA } });
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
@@ -33,17 +39,19 @@ export class Fetcher {
 
   // ========== Fear & Greed ==========
   async getFearGreed() {
-    // 方案1: alternative.me（加密货币 Fear & Greed，对 Workers 友好）
+    // 方案1: CNN 官方 API（美股市场 Fear & Greed）
+    try {
+      const d = await fetchJSONWithHeaders('https://production.dataviz.cnn.io/index/fearandgreed/graphdata', {
+        'Referer': 'https://edition.cnn.com/', 'Origin': 'https://edition.cnn.com'
+      });
+      const score = d?.fear_and_greed?.score;
+      if (score != null) return { value: round(score), label: this._fgLabel(score), source: 'CNN', updated_at: now() };
+    } catch {}
+    // 方案2: alternative.me（加密货币 FG，备选）
     try {
       const d = await fetchJSON('https://api.alternative.me/fng/?limit=1');
       const score = d?.data?.[0]?.value;
       if (score != null) return { value: round(parseFloat(score)), label: this._fgLabel(parseFloat(score)), source: 'alternative.me', updated_at: now() };
-    } catch {}
-    // 方案2: CNN API（可能被 Workers 屏蔽）
-    try {
-      const d = await fetchJSON('https://production.dataviz.cnn.io/index/fearandgreed/graphdata');
-      const score = d?.fear_and_greed?.score;
-      if (score != null) return { value: round(score), label: this._fgLabel(score), source: 'CNN', updated_at: now() };
     } catch {}
     // 方案3: 从 VIX 估算
     try {
@@ -146,14 +154,27 @@ export class Fetcher {
 
   // ========== PE Ratio ==========
   async getPERatio(symbol, name = '') {
+    // 方案1: Yahoo Finance
     try {
-      const d = await fetchJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1mo&interval=1d`);
-      const meta = d.chart?.result?.[0]?.meta;
-      // Yahoo Finance chart API 不直接返回 PE，需要从 summary 获取
       const summary = await fetchJSON(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=summaryDetail`);
       const pe = summary?.quoteSummary?.result?.[0]?.summaryDetail?.trailingPE?.raw;
-      return { value: pe != null && pe > 0 && pe < 200 ? round(pe) : null, source: 'Yahoo Finance', updated_at: now(), name };
-    } catch { return { value: null, source: 'Yahoo Finance', updated_at: now(), name }; }
+      if (pe != null && pe > 0 && pe < 200) return { value: round(pe), source: 'Yahoo Finance', updated_at: now(), name };
+    } catch {}
+    // 方案2: 腾讯财经（适用于中国 A 股）
+    try {
+      const code = symbol.replace('.SS', '').replace('.SZ', '');
+      const market = symbol.endsWith('.SS') ? 'sh' : 'sz';
+      const text = await fetchText(`https://qt.gtimg.cn/q=${market}${code}`);
+      const parts = text.split('~');
+      // 腾讯 API 字段 40（1-indexed）是 PE
+      if (parts.length >= 41) {
+        const pe = parseFloat(parts[39]);
+        if (!isNaN(pe) && pe > 0 && pe < 200) {
+          return { value: round(pe), source: '腾讯财经', updated_at: now(), name };
+        }
+      }
+    } catch {}
+    return { value: null, source: 'Yahoo Finance', updated_at: now(), name };
   }
 
   // ========== 技术指标（RSI, MA, MACD） ==========
@@ -190,6 +211,29 @@ export class Fetcher {
       result.high_52w = round(Math.max(...yearData));
       result.low_52w = round(Math.min(...yearData));
       result.pct_from_52w_high = round((close[close.length - 1] / result.high_52w - 1) * 100);
+    } catch {}
+    return result;
+  }
+// ========== 中国指数 PE（从腾讯财经获取） ==========
+  async getChinaIndexPE() {
+    const result = { shanghai_pe: null, csi300_pe: null };
+    try {
+      // 上证指数 PE（字段 40，1-indexed）
+      const text1 = await fetchText('https://qt.gtimg.cn/q=sh000001');
+      const parts1 = text1.split('~');
+      if (parts1.length >= 41) {
+        const pe = parseFloat(parts1[39]);
+        if (!isNaN(pe) && pe > 0 && pe < 100) result.shanghai_pe = round(pe);
+      }
+    } catch {}
+    try {
+      // 沪深300 PE
+      const text2 = await fetchText('https://qt.gtimg.cn/q=sh000300');
+      const parts2 = text2.split('~');
+      if (parts2.length >= 41) {
+        const pe = parseFloat(parts2[39]);
+        if (!isNaN(pe) && pe > 0 && pe < 100) result.csi300_pe = round(pe);
+      }
     } catch {}
     return result;
   }
