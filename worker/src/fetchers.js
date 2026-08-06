@@ -71,15 +71,32 @@ export class Fetcher {
 
   // ========== Put/Call Ratio ==========
   async getPutCallRatio() {
+    // 尝试从 Yahoo Finance SPY 期权链估算
+    try {
+      const d = await fetchJSON('https://query2.finance.yahoo.com/v7/finance/options/SPY');
+      const opt = d?.optionChain?.result?.[0]?.options?.[0];
+      if (opt) {
+        const calls = (opt.calls || []).reduce((s, c) => s + (c.volume || 0), 0);
+        const puts = (opt.puts || []).reduce((s, p) => s + (p.volume || 0), 0);
+        if (calls > 100 && puts > 100) {
+          const ratio = puts / calls;
+          if (ratio > 0.1 && ratio < 5) return { value: round(ratio), label: this._pcLabel(ratio), source: 'SPY期权估算', updated_at: now() };
+        }
+      }
+    } catch {}
+    // 备用: 从 CBOE 获取
     try {
       const d = await fetchJSON('https://cdn.cboe.com/api/global/us_statistics/trading_summary_current.json');
       const pc = d?.data?.put_call_ratio;
       if (pc != null && pc > 0.1 && pc < 5) return { value: round(pc), label: this._pcLabel(pc), source: 'CBOE', updated_at: now() };
     } catch {}
+    // 备用: 从 VIX 估算
     try {
-      const html = await fetchText('https://www.cboe.com/us/options/market_statistics/');
-      const m = html.match(/Put[-\s]Call.*?(\d+\.?\d*)/i);
-      if (m) { const v = parseFloat(m[1]); if (v > 0.1 && v < 5) return { value: round(v), label: this._pcLabel(v), source: 'CBOE', updated_at: now() }; }
+      const vix = await this.getVIX();
+      if (vix?.value) {
+        const estimated = 0.4 + (vix.value - 10) * 0.03;
+        if (estimated > 0.1 && estimated < 5) return { value: round(estimated), label: this._pcLabel(estimated), source: '根据VIX估算', updated_at: now() };
+      }
     } catch {}
     return { value: null, label: '未知', source: 'CBOE', updated_at: now() };
   }
@@ -105,9 +122,20 @@ export class Fetcher {
   async getShillerPE() {
     try {
       const html = await fetchText('https://www.multpl.com/shiller-pe');
-      let m = html.match(/Shiller\s*PE\s*Ratio\s*:\s*(\d+\.?\d*)/i);
-      if (!m) m = html.match(/Current[^:]*:\s*(\d+\.?\d*)/i);
-      if (m) return { value: round(parseFloat(m[1])), source: 'multpl.com', updated_at: now() };
+      // meta description: "Current Shiller PE Ratio is 42.19"
+      let m = html.match(/Shiller\s*PE\s*Ratio\s*is\s*(\d+\.?\d*)/i);
+      if (!m) {
+        // 备用: <div id="current"> 附近找数字
+        const idx = html.indexOf('id="current"');
+        if (idx >= 0) {
+          const near = html.substring(idx, idx + 500);
+          m = near.match(/(\d+\.\d+)/);
+        }
+      }
+      if (m) {
+        const v = parseFloat(m[1]);
+        if (v > 5 && v < 100) return { value: round(v), source: 'multpl.com', updated_at: now() };
+      }
     } catch {}
     return { value: null, source: 'multpl.com', updated_at: now() };
   }
