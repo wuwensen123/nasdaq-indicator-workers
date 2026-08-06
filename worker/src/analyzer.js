@@ -13,6 +13,20 @@ export class Analyzer {
         weights: { rsi: 0.20, dxy: 0.25, yield_10y: 0.20, ma200: 0.15, vix: 0.10, fear_greed: 0.10 }, pe_normal: null },
       { id: 'hsi', name: '恒生指数', symbol: '^HSI', type: '香港指数', indicators: ['pe_hsi', 'rsi', 'fear_greed', 'ma200', 'vix', 'dxy'],
         weights: { pe_hsi: 0.25, rsi: 0.20, fear_greed: 0.15, ma200: 0.15, vix: 0.15, dxy: 0.10 }, pe_normal: 12 },
+      { id: 'dividend_low_vol_etf', name: '红利低波ETF(512890)', symbol: '512890.SS', type: '中国ETF', indicators: ['rsi', 'ma200', 'pe_shanghai', 'pe_csi300'],
+        weights: { rsi: 0.30, ma200: 0.25, pe_shanghai: 0.25, pe_csi300: 0.20 }, pe_normal: null },
+      { id: 'dividend_low_vol_100', name: '红利低波100(930955)', symbol: '000300.SS', type: '中国指数', indicators: ['rsi', 'ma200', 'pe_shanghai', 'pe_csi300'],
+        weights: { rsi: 0.30, ma200: 0.25, pe_shanghai: 0.25, pe_csi300: 0.20 }, pe_normal: null },
+      { id: 'abc_bank', name: '农业银行(601288)', symbol: '601288.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
+        weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
+      { id: 'ccb_bank', name: '建设银行(601939)', symbol: '601939.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
+        weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
+      { id: 'yangtze_power', name: '长江电力(600900)', symbol: '600900.SS', type: '中国电力股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
+        weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
+      { id: 'cmb_bank', name: '招商银行(600036)', symbol: '600036.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
+        weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
+      { id: 'zijin_mining', name: '紫金矿业(601899)', symbol: '601899.SS', type: '中国矿业股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
+        weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
     ];
   }
 
@@ -59,6 +73,9 @@ export class Analyzer {
       'pe_qqq': () => { const v = td.pe_ratio ?? g.shiller_pe?.value; const s = normPE(v, cfg.pe_normal || 25); return { ...s, value: v }; },
       'pe_sp500': () => { const v = td.pe_ratio ?? g.shiller_pe?.value; const s = normPE(v, cfg.pe_normal || 22); return { ...s, value: v }; },
       'pe_hsi': () => { const v = td.pe_ratio; const s = normPE_HSI(v); return { ...s, value: v }; },
+      'pe_shanghai': () => { const v = td.pe_ratio; const s = normPE_Shanghai(v); return { ...s, value: v }; },
+      'pe_csi300': () => { const v = td.pe_ratio; const s = normPE_CSI300(v); return { ...s, value: v }; },
+      'pe_stock': () => { const v = td.pe_ratio; const s = normPE_Stock(v); return { ...s, value: v }; },
     };
 
     if (globalIndicators[ind]) return { ...base, ...globalIndicators[ind]() };
@@ -96,6 +113,7 @@ export class Analyzer {
       vix: 'VIX波动率', fear_greed: '恐惧与贪婪指数', put_call: '看跌/看涨比率',
       yield_10y: '10年期国债收益率', dxy: '美元指数DXY',
       pe_qqq: '纳斯达克100市盈率', pe_sp500: '标普500市盈率', pe_hsi: '恒生指数市盈率',
+      pe_shanghai: '上证指数市盈率', pe_csi300: '沪深300市盈率', pe_stock: '个股市盈率',
       rsi: 'RSI(14)', ma200: '200日均线偏离度',
     };
     return names[k] || k;
@@ -191,6 +209,36 @@ function normMA200(v) {
   if (v < 10) return { score: cap(70 + (v - 5) / 5 * 15), label: '高于均线' };
   if (v < 20) return { score: cap(85 + (v - 10) / 10 * 10), label: '大幅高于均线' };
   return { score: cap(95 + Math.min(5, (v - 20) / 10 * 5)), label: '严重高于均线' };
+}
+
+function normPE_Shanghai(v) {
+  if (v == null) return { score: null, label: 'N/A' };
+  if (v < 10) return { score: 0, label: '历史低位' };
+  if (v < 12) return { score: cap((v - 10) / 2 * 20), label: '偏低' };
+  if (v < 14) return { score: cap(20 + (v - 12) / 2 * 25), label: '正常偏低' };
+  if (v < 16) return { score: cap(45 + (v - 14) / 2 * 25), label: '正常' };
+  if (v < 20) return { score: cap(70 + (v - 16) / 4 * 20), label: '偏高' };
+  return { score: cap(90 + Math.min(10, (v - 20) / 5 * 10)), label: '历史高位' };
+}
+
+function normPE_CSI300(v) {
+  if (v == null) return { score: null, label: 'N/A' };
+  if (v < 10) return { score: 0, label: '历史低位' };
+  if (v < 12) return { score: cap((v - 10) / 2 * 25), label: '偏低' };
+  if (v < 14) return { score: cap(25 + (v - 12) / 2 * 25), label: '正常偏低' };
+  if (v < 16) return { score: cap(50 + (v - 14) / 2 * 20), label: '正常' };
+  if (v < 18) return { score: cap(70 + (v - 16) / 2 * 15), label: '偏高' };
+  return { score: cap(85 + Math.min(15, (v - 18) / 5 * 15)), label: '历史高位' };
+}
+
+function normPE_Stock(v) {
+  if (v == null) return { score: null, label: 'N/A' };
+  if (v < 4) return { score: 0, label: '严重低估' };
+  if (v < 6) return { score: cap((v - 4) / 2 * 25), label: '低估' };
+  if (v < 8) return { score: cap(25 + (v - 6) / 2 * 25), label: '正常偏低' };
+  if (v < 10) return { score: cap(50 + (v - 8) / 2 * 20), label: '正常偏高' };
+  if (v < 15) return { score: cap(70 + (v - 10) / 5 * 20), label: '高估' };
+  return { score: cap(90 + Math.min(10, (v - 15) / 10 * 10)), label: '严重高估' };
 }
 
 function round(v, d = 2) { return v != null ? parseFloat(v.toFixed(d)) : null; }

@@ -58,7 +58,7 @@
         .card-header { background: transparent; border-bottom: 1px solid var(--border-color); padding: 12px 16px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
         .card-body { padding: 16px; }
         .global-indicator { text-align: center; padding: 16px; }
-        .global-indicator .value { font-size: 1.8rem; font-weight: 700; margin: 8px 0; }
+        .global-indicator .value { font-size: 1.8rem; font-weight: 700; margin: 8px 0; color: var(--text-primary); }
         .global-indicator .label { color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px; }
         .global-indicator .change { font-size: 0.85rem; }
         .change.up { color: var(--green); }
@@ -75,7 +75,7 @@
         .strategy-box .action { font-size: 1.5rem; font-weight: 700; margin-bottom: 8px; }
         .strategy-box .description { color: var(--text-secondary); font-size: 0.9rem; }
         .target-card { position: relative; overflow: hidden; }
-        .target-card .price { font-size: 1.2rem; font-weight: 600; }
+        .target-card .price { font-size: 1.2rem; font-weight: 600; color: var(--text-primary); }
         .target-card .score-bar { height: 6px; border-radius: 3px; margin: 12px 0; background: var(--border-color); position: relative; overflow: hidden; }
         .target-card .score-bar .fill { height: 100%; border-radius: 3px; transition: width 1s ease; }
         .target-card .badge-score { position: absolute; top: 12px; right: 12px; width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1rem; }
@@ -277,7 +277,7 @@ function renderGlobalIndicators(summary) {
             changeHtml = `<div class="change ${cls}">${ind.change >= 0 ? '▲' : '▼'} ${Math.abs(ind.change).toFixed(2)}%</div>`;
         }
         if (ind.status) statusHtml = `<div><span class="status-badge" style="background:${ind.status.color}22;color:${ind.status.color}">${ind.status.label}</span></div>`;
-        return `<div class="col-6 col-md-4 col-lg-3"><div class="card global-indicator h-100"><div class="label">${ind.title}</div><div class="value" style="color:${getScoreTextColor(ind.isLabel ? null : ind.value)}">${displayValue}</div>${statusHtml}${changeHtml}</div></div>`;
+        return `<div class="col-6 col-md-4 col-lg-3"><div class="card global-indicator h-100"><div class="label">${ind.title}</div><div class="value">${displayValue}</div>${statusHtml}${changeHtml}</div></div>`;
     }).join('');
 }
 

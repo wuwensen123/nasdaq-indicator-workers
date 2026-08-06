@@ -33,6 +33,12 @@ export class Fetcher {
 
   // ========== Fear & Greed ==========
   async getFearGreed() {
+    // 尝试 alternative.me API（对 Workers 友好）
+    try {
+      const d = await fetchJSON('https://api.alternative.me/fng/?limit=1');
+      const score = d?.data?.[0]?.value;
+      if (score != null) return { value: round(parseFloat(score)), label: this._fgLabel(parseFloat(score)), source: 'alternative.me', updated_at: now() };
+    } catch {}
     try {
       const d = await fetchJSON('https://production.dataviz.cnn.io/index/fearandgreed/graphdata');
       const score = d?.fear_and_greed?.score;
@@ -41,12 +47,9 @@ export class Fetcher {
     try {
       const html = await fetchText('https://money.cnn.com/data/fear-and-greed/');
       const m = html.match(/fear.?greed.*?(\d{1,3})/i) || html.match(/(\d{1,3})\s*\/\s*100\s*(?:Fear|Greed|Neutral)/i);
-      if (m) {
-        const v = parseFloat(m[1]);
-        return { value: v, label: this._fgLabel(v), source: 'CNN Money', updated_at: now() };
-      }
+      if (m) { const v = parseFloat(m[1]); return { value: v, label: this._fgLabel(v), source: 'CNN Money', updated_at: now() }; }
     } catch {}
-    return { value: null, label: '未知', source: 'CNN Money', updated_at: now() };
+    return { value: null, label: '未知', source: 'alternative.me', updated_at: now() };
   }
   _fgLabel(v) {
     if (v <= 25) return '极度恐惧'; if (v <= 40) return '恐惧'; if (v <= 60) return '中性'; if (v <= 75) return '贪婪';
@@ -69,12 +72,14 @@ export class Fetcher {
   // ========== Put/Call Ratio ==========
   async getPutCallRatio() {
     try {
+      const d = await fetchJSON('https://cdn.cboe.com/api/global/us_statistics/trading_summary_current.json');
+      const pc = d?.data?.put_call_ratio;
+      if (pc != null && pc > 0.1 && pc < 5) return { value: round(pc), label: this._pcLabel(pc), source: 'CBOE', updated_at: now() };
+    } catch {}
+    try {
       const html = await fetchText('https://www.cboe.com/us/options/market_statistics/');
       const m = html.match(/Put[-\s]Call.*?(\d+\.?\d*)/i);
-      if (m) {
-        const v = parseFloat(m[1]);
-        if (v > 0.1 && v < 5) return { value: round(v), label: this._pcLabel(v), source: 'CBOE', updated_at: now() };
-      }
+      if (m) { const v = parseFloat(m[1]); if (v > 0.1 && v < 5) return { value: round(v), label: this._pcLabel(v), source: 'CBOE', updated_at: now() }; }
     } catch {}
     return { value: null, label: '未知', source: 'CBOE', updated_at: now() };
   }
