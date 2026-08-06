@@ -204,7 +204,14 @@ export class Fetcher {
       const ema26 = calcEMA(close, 26);
       const macdLine = ema12 - ema26;
       result.macd = round(macdLine);
-      result.macd_signal = round(calcEMA([...Array(Math.min(25, close.length - 1)).fill(macdLine), macdLine], 9));
+      // 计算实际 MACD 历史值，再取 EMA(9) 作信号线
+      const macdValues = [];
+      for (let i = 26; i < close.length; i++) {
+        const e12 = calcEMA(close.slice(0, i + 1), 12);
+        const e26 = calcEMA(close.slice(0, i + 1), 26);
+        macdValues.push(e12 - e26);
+      }
+      result.macd_signal = macdValues.length >= 9 ? round(calcEMA(macdValues, 9)) : round(macdLine);
 
       // 52周高低点
       const yearData = close.slice(-252);

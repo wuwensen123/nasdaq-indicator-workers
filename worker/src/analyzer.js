@@ -21,12 +21,12 @@ export class Analyzer {
         weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
       { id: 'ccb_bank', name: '建设银行(601939)', symbol: '601939.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
         weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
-      { id: 'yangtze_power', name: '长江电力(600900)', symbol: '600900.SS', type: '中国电力股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
-        weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
+      { id: 'yangtze_power', name: '长江电力(600900)', symbol: '600900.SS', type: '中国电力股', indicators: ['rsi', 'ma200', 'pe_utility', 'pe_csi300'],
+        weights: { rsi: 0.30, ma200: 0.25, pe_utility: 0.25, pe_csi300: 0.20 }, pe_normal: null },
       { id: 'cmb_bank', name: '招商银行(600036)', symbol: '600036.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
         weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
-      { id: 'zijin_mining', name: '紫金矿业(601899)', symbol: '601899.SS', type: '中国矿业股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
-        weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
+      { id: 'zijin_mining', name: '紫金矿业(601899)', symbol: '601899.SS', type: '中国矿业股', indicators: ['rsi', 'ma200', 'pe_mining', 'pe_csi300'],
+        weights: { rsi: 0.30, ma200: 0.25, pe_mining: 0.25, pe_csi300: 0.20 }, pe_normal: null },
     ];
   }
 
@@ -79,6 +79,8 @@ export class Analyzer {
       'pe_shanghai': () => { const v = g.cn_market?.shanghai_pe ?? td.pe_ratio; const s = normPE_Shanghai(v); return { ...s, value: v }; },
       'pe_csi300': () => { const v = g.cn_market?.csi300_pe ?? td.pe_ratio; const s = normPE_CSI300(v); return { ...s, value: v }; },
       'pe_stock': () => { const v = td.pe_ratio; const s = normPE_Stock(v); return { ...s, value: v }; },
+      'pe_utility': () => { const v = td.pe_ratio; const s = normPE_Utility(v); return { ...s, value: v }; },
+      'pe_mining': () => { const v = td.pe_ratio; const s = normPE_Mining(v); return { ...s, value: v }; },
     };
 
     if (globalIndicators[ind]) return { ...base, ...globalIndicators[ind]() };
@@ -116,7 +118,8 @@ export class Analyzer {
       vix: 'VIX波动率', fear_greed: '恐惧与贪婪指数', put_call: '看跌/看涨比率',
       yield_10y: '10年期国债收益率', dxy: '美元指数DXY',
       pe_qqq: '纳斯达克100市盈率', pe_sp500: '标普500市盈率', pe_hsi: '恒生指数市盈率',
-      pe_shanghai: '上证指数市盈率', pe_csi300: '沪深300市盈率', pe_stock: '个股市盈率',
+      pe_shanghai: '上证指数市盈率', pe_csi300: '沪深300市盈率',
+      pe_stock: '银行股市盈率', pe_utility: '电力股市盈率', pe_mining: '矿业股市盈率',
       rsi: 'RSI(14)', ma200: '200日均线偏离度',
     };
     return names[k] || k;
@@ -133,7 +136,9 @@ export class Analyzer {
       pe_hsi: { name: '恒生指数市盈率', desc: '估值水平，越高越贵' },
       pe_shanghai: { name: '上证指数市盈率', desc: 'A股整体估值水平' },
       pe_csi300: { name: '沪深300市盈率', desc: '大盘股估值水平' },
-      pe_stock: { name: '个股市盈率', desc: '个股估值水平' },
+      pe_stock: { name: '银行股市盈率', desc: '银行股估值水平' },
+      pe_utility: { name: '电力股市盈率', desc: '电力行业估值水平' },
+      pe_mining: { name: '矿业股市盈率', desc: '矿业行业估值水平' },
       rsi: { name: 'RSI(14)相对强弱指标', desc: '技术指标，越高越超买' },
       ma200: { name: '200日均线偏离度', desc: '价格相对于200日均线的位置' },
     };
@@ -235,31 +240,51 @@ function normMA200(v) {
 function normPE_Shanghai(v) {
   if (v == null) return { score: null, label: 'N/A' };
   if (v < 10) return { score: 0, label: '历史低位' };
-  if (v < 12) return { score: cap((v - 10) / 2 * 20), label: '偏低' };
-  if (v < 14) return { score: cap(20 + (v - 12) / 2 * 25), label: '正常偏低' };
-  if (v < 16) return { score: cap(45 + (v - 14) / 2 * 25), label: '正常' };
-  if (v < 20) return { score: cap(70 + (v - 16) / 4 * 20), label: '偏高' };
-  return { score: cap(90 + Math.min(10, (v - 20) / 5 * 10)), label: '历史高位' };
+  if (v < 12) return { score: cap((v - 10) / 2 * 25), label: '偏低' };
+  if (v < 14) return { score: cap(25 + (v - 12) / 2 * 25), label: '正常' };
+  if (v < 16) return { score: cap(50 + (v - 14) / 2 * 20), label: '偏高' };
+  if (v < 18) return { score: cap(70 + (v - 16) / 2 * 15), label: '高估' };
+  return { score: cap(85 + Math.min(15, (v - 18) / 2 * 15)), label: '严重高估' };
 }
 
 function normPE_CSI300(v) {
   if (v == null) return { score: null, label: 'N/A' };
   if (v < 10) return { score: 0, label: '历史低位' };
   if (v < 12) return { score: cap((v - 10) / 2 * 25), label: '偏低' };
-  if (v < 14) return { score: cap(25 + (v - 12) / 2 * 25), label: '正常偏低' };
-  if (v < 16) return { score: cap(50 + (v - 14) / 2 * 20), label: '正常' };
-  if (v < 18) return { score: cap(70 + (v - 16) / 2 * 15), label: '偏高' };
-  return { score: cap(85 + Math.min(15, (v - 18) / 5 * 15)), label: '历史高位' };
+  if (v < 14) return { score: cap(25 + (v - 12) / 2 * 25), label: '正常' };
+  if (v < 15) return { score: cap(50 + (v - 14) / 1 * 15), label: '偏高' };
+  if (v < 17) return { score: cap(65 + (v - 15) / 2 * 20), label: '高估' };
+  return { score: cap(85 + Math.min(15, (v - 17) / 3 * 15)), label: '严重高估' };
 }
 
 function normPE_Stock(v) {
   if (v == null) return { score: null, label: 'N/A' };
   if (v < 4) return { score: 0, label: '严重低估' };
-  if (v < 6) return { score: cap((v - 4) / 2 * 25), label: '低估' };
-  if (v < 8) return { score: cap(25 + (v - 6) / 2 * 25), label: '正常偏低' };
-  if (v < 10) return { score: cap(50 + (v - 8) / 2 * 20), label: '正常偏高' };
-  if (v < 15) return { score: cap(70 + (v - 10) / 5 * 20), label: '高估' };
-  return { score: cap(90 + Math.min(10, (v - 15) / 10 * 10)), label: '严重高估' };
+  if (v < 5) return { score: cap((v - 4) / 1 * 20), label: '低估' };
+  if (v < 6) return { score: cap(20 + (v - 5) / 1 * 25), label: '正常偏低' };
+  if (v < 7) return { score: cap(45 + (v - 6) / 1 * 25), label: '正常' };
+  if (v < 8) return { score: cap(70 + (v - 7) / 1 * 15), label: '偏高' };
+  return { score: cap(85 + Math.min(15, (v - 8) / 2 * 15)), label: '高估' };
+}
+
+function normPE_Utility(v) {
+  if (v == null) return { score: null, label: 'N/A' };
+  if (v < 10) return { score: 0, label: '严重低估' };
+  if (v < 13) return { score: cap((v - 10) / 3 * 20), label: '低估' };
+  if (v < 16) return { score: cap(20 + (v - 13) / 3 * 25), label: '正常偏低' };
+  if (v < 20) return { score: cap(45 + (v - 16) / 4 * 25), label: '正常' };
+  if (v < 25) return { score: cap(70 + (v - 20) / 5 * 15), label: '偏高' };
+  return { score: cap(85 + Math.min(15, (v - 25) / 5 * 15)), label: '高估' };
+}
+
+function normPE_Mining(v) {
+  if (v == null) return { score: null, label: 'N/A' };
+  if (v < 8) return { score: 0, label: '严重低估' };
+  if (v < 10) return { score: cap((v - 8) / 2 * 20), label: '低估' };
+  if (v < 12) return { score: cap(20 + (v - 10) / 2 * 25), label: '正常偏低' };
+  if (v < 15) return { score: cap(45 + (v - 12) / 3 * 25), label: '正常' };
+  if (v < 18) return { score: cap(70 + (v - 15) / 3 * 15), label: '偏高' };
+  return { score: cap(85 + Math.min(15, (v - 18) / 3 * 15)), label: '高估' };
 }
 
 function round(v, d = 2) { return v != null ? parseFloat(v.toFixed(d)) : null; }

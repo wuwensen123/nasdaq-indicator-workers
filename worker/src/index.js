@@ -71,8 +71,6 @@ async function setCache(env, data, fetchedAt) {
 
 // 获取新鲜数据（实时抓取）
 async function fetchFreshData() {
-  const fetcher = new Fetcher();
-  const analyzer = new Analyzer();
   const start = Date.now();
   const targets = analyzer.getTargets();
 
