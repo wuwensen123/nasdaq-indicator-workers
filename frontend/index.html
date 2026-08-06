@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>纳斯达克100 买入卖出指标仪表盘</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0d1117;
+            --bg-card: #161b22;
+            --bg-card-hover: #1c2333;
+            --border-color: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --green: #3fb950;
+            --yellow: #d29922;
+            --red: #f85149;
+            --orange: #d4760a;
+            --blue: #58a6ff;
+            --purple: #bc8cff;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            border-bottom: 1px solid var(--border-color);
+            padding: 24px 0;
+            position: sticky; top: 0; z-index: 100; backdrop-filter: blur(10px);
+        }
+        .header h1 {
+            font-size: 1.6rem; font-weight: 700; margin: 0;
+            background: linear-gradient(90deg, #79c0ff, #d2a8ff, #f088f0);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .header .subtitle { color: #c9d1d9; font-size: 0.9rem; margin-top: 4px; }
+        .header-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .update-time { color: var(--text-secondary); font-size: 0.85rem; }
+        .update-time .value { color: var(--blue); }
+        .btn-refresh {
+            background: linear-gradient(135deg, #238636, #2ea043); border: none; color: white;
+            padding: 8px 20px; border-radius: 8px; font-size: 0.9rem; font-weight: 500;
+            cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+        }
+        .btn-refresh:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(46, 160, 67, 0.3); }
+        .btn-refresh:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .btn-refresh .spinner { display: none; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        .btn-refresh.loading .spinner { display: inline-block; }
+        .btn-refresh.loading .btn-text { display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; height: 100%; transition: all 0.2s; }
+        .card:hover { border-color: #484f58; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+        .card-header { background: transparent; border-bottom: 1px solid var(--border-color); padding: 12px 16px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+        .card-body { padding: 16px; }
+        .global-indicator { text-align: center; padding: 16px; }
+        .global-indicator .value { font-size: 1.8rem; font-weight: 700; margin: 8px 0; }
+        .global-indicator .label { color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px; }
+        .global-indicator .change { font-size: 0.85rem; }
+        .change.up { color: var(--green); }
+        .change.down { color: var(--red); }
+        .status-badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 500; }
+        .composite-section { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+        .score-gauge-container { position: relative; width: 200px; height: 200px; margin: 0 auto; }
+        .score-gauge-container canvas { width: 100% !important; height: 100% !important; }
+        .score-value { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+        .score-value .number { font-size: 2.5rem; font-weight: 800; line-height: 1; }
+        .score-value .unit { font-size: 0.85rem; color: var(--text-secondary); }
+        .score-label { font-size: 1.1rem; font-weight: 600; margin-top: 12px; }
+        .strategy-box { background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px; margin-top: 16px; text-align: center; }
+        .strategy-box .action { font-size: 1.5rem; font-weight: 700; margin-bottom: 8px; }
+        .strategy-box .description { color: var(--text-secondary); font-size: 0.9rem; }
+        .target-card { position: relative; overflow: hidden; }
+        .target-card .price { font-size: 1.2rem; font-weight: 600; }
+        .target-card .score-bar { height: 6px; border-radius: 3px; margin: 12px 0; background: var(--border-color); position: relative; overflow: hidden; }
+        .target-card .score-bar .fill { height: 100%; border-radius: 3px; transition: width 1s ease; }
+        .target-card .badge-score { position: absolute; top: 12px; right: 12px; width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1rem; }
+        .target-card .strategy-tag { display: inline-block; padding: 4px 14px; border-radius: 20px; font-weight: 600; font-size: 0.9rem; margin-top: 8px; }
+        .indicator-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-color); }
+        .indicator-item:last-child { border-bottom: none; }
+        .indicator-item .indicator-name { font-size: 0.9rem; color: var(--text-secondary); }
+        .indicator-item .indicator-score { display: flex; align-items: center; gap: 12px; }
+        .indicator-item .indicator-score .score-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .indicator-item .indicator-value { font-size: 0.8rem; color: var(--text-secondary); min-width: 50px; text-align: right; }
+        .nav-tabs { border-bottom: 1px solid var(--border-color); }
+        .nav-tabs .nav-link { color: var(--text-secondary); border: none; padding: 10px 16px; font-size: 0.9rem; }
+        .nav-tabs .nav-link:hover { color: var(--text-primary); border: none; }
+        .nav-tabs .nav-link.active { color: var(--blue); background: transparent; border-bottom: 2px solid var(--blue); }
+        .formula-box { background: rgba(88, 166, 255, 0.05); border: 1px solid rgba(88, 166, 255, 0.2); border-radius: 8px; padding: 12px 16px; margin-top: 12px; }
+        .formula-box .formula-text { font-family: 'Courier New', monospace; font-size: 0.85rem; color: var(--blue); }
+        .formula-box .formula-detail { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+        .loading-overlay { display: flex; align-items: center; justify-content: center; min-height: 400px; }
+        .loading-spinner { width: 48px; height: 48px; border: 3px solid var(--border-color); border-top-color: var(--blue); border-radius: 50%; animation: spin 1s linear infinite; }
+        .error-message { background: rgba(248, 81, 73, 0.1); border: 1px solid rgba(248, 81, 73, 0.3); border-radius: 8px; padding: 20px; text-align: center; color: var(--red); }
+        @media (max-width: 768px) {
+            .header h1 { font-size: 1.2rem; }
+            .header-controls { margin-top: 12px; width: 100%; }
+            .score-gauge-container { width: 160px; height: 160px; }
+            .score-value .number { font-size: 2rem; }
+            .global-indicator .value { font-size: 1.4rem; }
+        }
+        .fade-in { animation: fadeIn 0.5s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .section-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }
+        .data-source { font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; }
+        .fetch-time { color: var(--text-secondary); font-size: 0.8rem; }
+        .api-url-bar { margin-top: 8px; display: flex; gap: 8px; align-items: center; }
+        .api-url-bar input { background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 12px; color: var(--text-primary); font-size: 0.8rem; width: 300px; }
+        .api-url-bar button { background: transparent; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-secondary); padding: 4px 12px; cursor: pointer; font-size: 0.8rem; }
+        .api-url-bar button:hover { border-color: var(--blue); color: var(--blue); }
+    </style>
+</head>
+<body>
+
+<header class="header">
+    <div class="container">
+        <div class="row align-items-center">
+            <div class="col-md-6">
+                <h1>📊 纳斯达克100 买入卖出指标仪表盘</h1>
+                <div class="subtitle">基于多维度市场指标的智能定投决策系统</div>
+                <div class="api-url-bar">
+                    <span style="color:var(--text-secondary);font-size:0.8rem;">API:</span>
+                    <input type="text" id="apiUrlInput" value="/api/data" placeholder="Worker URL">
+                    <button onclick="updateApiUrl()">更新</button>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="header-controls justify-content-md-end">
+                    <div class="update-time">
+                        <div>数据更新时间</div>
+                        <div class="value" id="updateTime">--</div>
+                    </div>
+                    <button class="btn-refresh" id="refreshBtn" onclick="refreshData()">
+                        <span class="spinner"></span>
+                        <span class="btn-text">🔄 手动刷新</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</header>
+
+<main class="container py-4">
+    <div id="loadingState" class="loading-overlay">
+        <div class="text-center">
+            <div class="loading-spinner mb-3"></div>
+            <div class="text-secondary">正在获取实时市场数据...</div>
+            <div class="text-secondary" style="font-size:0.8rem;margin-top:4px;">首次加载可能需要30-60秒</div>
+        </div>
+    </div>
+
+    <div id="errorState" class="d-none">
+        <div class="error-message">
+            <h5>⚠️ 数据获取失败</h5>
+            <p id="errorMessage" class="mb-0 mt-2"></p>
+            <button class="btn btn-outline-danger mt-3" onclick="refreshData()">重新尝试</button>
+        </div>
+    </div>
+
+    <div id="dashboardContent" class="d-none">
+        <section class="mb-4 fade-in">
+            <h2 class="section-title">🌍 全球市场指标概览</h2>
+            <div class="row g-3" id="globalIndicators"></div>
+        </section>
+
+        <section class="mb-4 fade-in">
+            <h2 class="section-title">🎯 投资标的分析</h2>
+            <div class="row g-3" id="targetCards"></div>
+        </section>
+
+        <section class="mb-4 fade-in">
+            <div class="card">
+                <div class="card-header">
+                    <span>📐 评分公式说明</span>
+                    <span class="text-secondary" style="font-size:0.8rem;cursor:pointer;" onclick="toggleFormula()">展开详情 ▼</span>
+                </div>
+                <div class="card-body" id="formulaContent">
+                    <div class="formula-box">
+                        <div class="formula-text" id="formulaText">综合评分 = 各指标评分 × 权重的加权平均</div>
+                        <div class="formula-detail mt-2">
+                            <strong>评分范围：</strong>0-100分<br>
+                            <strong>0分</strong> = 强烈买入信号（市场极度恐慌/低估）<br>
+                            <strong>50分</strong> = 中性（估值合理）<br>
+                            <strong>100分</strong> = 强烈卖出信号（市场极度贪婪/高估）<br>
+                            <br>
+                            <strong>定投策略：</strong><br>
+                            • 0-10分：ALL IN - 历史性买入机会<br>
+                            • 10-25分：3倍定投 - 市场明显低估<br>
+                            • 25-40分：2倍定投 - 市场偏低估<br>
+                            • 40-60分：1倍定投 - 正常定投<br>
+                            • 60-75分：0.5倍定投 - 市场偏贵，减少投入<br>
+                            • 75-90分：暂停定投 - 观望为主<br>
+                            • 90-100分：减仓/卖出 - 锁定利润
+                        </div>
+                    </div>
+                    <div class="mt-3" id="detailFormula"></div>
+                </div>
+                <div class="card-footer text-center data-source" id="footerInfo">
+                    数据来源: Yahoo Finance, CNN Money, CBOE, U.S. Treasury
+                </div>
+            </div>
+        </section>
+    </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+let appState = { data: null, charts: [], isRefreshing: false, autoRefreshInterval: null, apiBase: '/api' };
+
+function getApiUrl(path) { return appState.apiBase + path; }
+
+function updateApiUrl() {
+    const val = document.getElementById('apiUrlInput').value.trim();
+    if (val) {
+        appState.apiBase = val.replace(/\/+$/, '');
+        document.getElementById('apiUrlInput').value = appState.apiBase;
+        fetchData();
+    }
+}
+
+function getScoreColor(score) {
+    if (score === null || score === undefined) return '#6c757d';
+    if (score <= 20) return '#dc3545'; if (score <= 40) return '#fd7e14'; if (score <= 60) return '#28a745'; if (score <= 80) return '#ffc107';
+    return '#dc3545';
+}
+function getScoreTextColor(score) {
+    if (score === null || score === undefined) return '#6c757d';
+    if (score <= 20) return '#ff6b6b'; if (score <= 40) return '#ffa94d'; if (score <= 60) return '#69db7c'; if (score <= 80) return '#ffd43b';
+    return '#ff6b6b';
+}
+function getStrategyColor(action) {
+    const colors = { 'ALL IN': '#dc3545', '3倍定投': '#fd7e14', '2倍定投': '#ffc107', '1倍定投': '#28a745', '0.5倍定投': '#ffc107', '暂停定投': '#fd7e14', '减仓/卖出': '#dc3545' };
+    return colors[action] || '#6c757d';
+}
+function formatNumber(num, decimals = 2) { if (num === null || num === undefined) return '--'; if (typeof num === 'string') return num; return num.toFixed(decimals); }
+function formatTime(timeStr) { return timeStr || '--'; }
+
+function createGauge(canvasId, score) {
+    const value = score !== null && score !== undefined ? score : 50;
+    const color = getScoreColor(value);
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return null;
+    const existing = Chart.getChart(canvasId);
+    if (existing) existing.destroy();
+    return new Chart(ctx, {
+        type: 'doughnut',
+        data: { datasets: [{ data: [value, 100 - value], backgroundColor: [color, 'rgba(48, 54, 61, 0.5)'], borderWidth: 0, borderRadius: 5, circumference: 270, rotation: 135 }] },
+        options: { responsive: true, maintainAspectRatio: true, cutout: '75%', plugins: { legend: { display: false }, tooltip: { enabled: false } } }
+    });
+}
+
+function renderGlobalIndicators(summary) {
+    const container = document.getElementById('globalIndicators');
+    if (!container) return;
+    const items = [
+        { key: 'vix', title: 'VIX 波动率指数', value: summary.vix?.value, change: summary.vix?.change, status: getVixStatus(summary.vix?.value) },
+        { key: 'fear_greed', title: '恐惧与贪婪指数', value: summary.fear_greed?.value, label: summary.fear_greed?.label, isLabel: true },
+        { key: 'treasury_10y', title: '10Y国债收益率', value: summary.treasury_10y?.value, unit: '%', change: summary.treasury_10y?.change },
+        { key: 'put_call_ratio', title: 'Put/Call比率', value: summary.put_call_ratio?.value, label: summary.put_call_ratio?.label, isLabel: true },
+        { key: 'dxy', title: '美元指数 DXY', value: summary.dxy?.value, change: summary.dxy?.change },
+        { key: 'shiller_pe', title: 'Shiller CAPE', value: summary.shiller_pe?.value },
+    ];
+    container.innerHTML = items.map(ind => {
+        let displayValue = '--', statusHtml = '', changeHtml = '';
+        if (ind.value !== null && ind.value !== undefined) displayValue = formatNumber(ind.value) + (ind.unit || '');
+        if (ind.isLabel && ind.label) {
+            const badgeClass = ({ '极度恐惧': 'badge bg-danger', '恐惧': 'badge bg-warning text-dark', '中性': 'badge bg-secondary', '贪婪': 'badge bg-warning text-dark', '极度贪婪': 'badge bg-danger', '极度看涨': 'badge bg-danger', '看涨': 'badge bg-warning text-dark', '看跌': 'badge bg-primary', '极度看跌': 'badge bg-danger' })[ind.label] || 'badge bg-secondary';
+            statusHtml = `<div><span class="${badgeClass}">${ind.label}</span></div>`;
+        }
+        if (ind.change !== undefined && ind.change !== null) {
+            const cls = ind.change >= 0 ? 'up' : 'down';
+            changeHtml = `<div class="change ${cls}">${ind.change >= 0 ? '▲' : '▼'} ${Math.abs(ind.change).toFixed(2)}%</div>`;
+        }
+        if (ind.status) statusHtml = `<div><span class="status-badge" style="background:${ind.status.color}22;color:${ind.status.color}">${ind.status.label}</span></div>`;
+        return `<div class="col-6 col-md-4 col-lg-3"><div class="card global-indicator h-100"><div class="label">${ind.title}</div><div class="value" style="color:${getScoreTextColor(ind.isLabel ? null : ind.value)}">${displayValue}</div>${statusHtml}${changeHtml}</div></div>`;
+    }).join('');
+}
+
+function getVixStatus(v) {
+    if (v === null || v === undefined) return null;
+    if (v < 15) return { label: '低波动', color: '#ffd43b' }; if (v < 20) return { label: '正常', color: '#69db7c' }; if (v < 25) return { label: '偏高', color: '#ffa94d' }; if (v < 30) return { label: '高波动', color: '#ff6b6b' };
+    return { label: '恐慌', color: '#dc3545' };
+}
+
+function renderTargetCard(target, index) {
+    const score = target.composite_score;
+    const scoreColor = getScoreColor(score);
+    const strategyColor = getStrategyColor(target.strategy?.action);
+    return `<div class="col-md-6 col-lg-4 fade-in" style="animation-delay:${(index % 6) * 0.1}s"><div class="card target-card" onclick="showTargetDetail('${target.target_id}')" style="cursor:pointer;"><div class="card-body"><div class="d-flex justify-content-between align-items-start"><div><h6 class="mb-1" style="font-size:0.95rem;">${target.target_name}</h6><span class="text-secondary" style="font-size:0.8rem;">${target.target_type}</span><div class="price mt-1">${target.current_price ? formatNumber(target.current_price) : '--'}</div></div><div class="badge-score" style="background:${scoreColor}22;color:${scoreColor};border:2px solid ${scoreColor}">${score !== null ? score : '?'}</div></div><div class="score-bar"><div class="fill" style="width:${score !== null ? score : 0}%;background:${scoreColor};"></div></div><div class="d-flex justify-content-between align-items-center"><div><span class="text-secondary" style="font-size:0.8rem;">市场位置:</span> <span style="font-size:0.85rem;color:${target.position_color};">${target.market_position}</span></div><div><span class="strategy-tag" style="background:${strategyColor}22;color:${strategyColor};border:1px solid ${strategyColor}">${target.strategy?.icon || ''} ${target.strategy?.action || '--'}</span></div></div></div></div></div>`;
+}
+
+function renderTargets(targets) {
+    const container = document.getElementById('targetCards');
+    if (!container) return;
+    container.innerHTML = targets.map((t, i) => renderTargetCard(t, i)).join('');
+}
+
+function renderFormula(targets) {
+    const container = document.getElementById('detailFormula');
+    if (!targets || targets.length === 0) return;
+    const qqq = targets.find(t => t.target_id === 'qqq');
+    if (qqq && qqq.formula) document.getElementById('formulaText').textContent = qqq.formula;
+    container.innerHTML = targets.map(t => `<div class="mb-2"><strong>${t.target_name}:</strong> <span class="formula-text">${t.formula}</span></div>`).join('');
+}
+
+function renderDashboard(data) {
+    if (!data || !data.success) { showError(data?.error || '未知错误'); return; }
+    appState.data = data;
+    document.getElementById('updateTime').textContent = formatTime(data.fetched_at);
+    renderGlobalIndicators(data.global_summary);
+    if (data.analysis?.results) { renderTargets(data.analysis.results); renderFormula(data.analysis.results); }
+    const footer = document.getElementById('footerInfo');
+    if (footer) footer.innerHTML = `数据来源: Yahoo Finance, CNN Money, CBOE, U.S. Treasury ${data.fetch_time_seconds ? `（数据获取耗时 ${data.fetch_time_seconds} 秒）` : ''}`;
+    document.getElementById('loadingState').classList.add('d-none');
+    document.getElementById('errorState').classList.add('d-none');
+    document.getElementById('dashboardContent').classList.remove('d-none');
+}
+
+function showTargetDetail(targetId) {
+    if (!appState.data?.analysis?.results) return;
+    const target = appState.data.analysis.results.find(t => t.target_id === targetId);
+    if (!target) return;
+    const score = target.composite_score;
+    const scoreColor = getScoreColor(score);
+    const indicatorsHtml = target.indicators.map(ind => {
+        const indScore = ind.score, indColor = getScoreColor(indScore);
+        const displayValue = ind.value !== null && ind.value !== undefined ? formatNumber(ind.value) + (ind.unit || '') : '--';
+        return `<div class="indicator-item"><div><div class="indicator-name">${ind.name}</div><div style="font-size:0.75rem;color:var(--text-secondary);">${ind.description || ''}</div></div><div class="indicator-score"><div class="indicator-value">${displayValue}</div><div><span class="score-dot" style="background:${indColor}"></span> <span style="font-size:0.85rem;font-weight:600;color:${indColor}">${indScore !== null ? indScore : '--'}</span></div><div style="font-size:0.75rem;color:var(--text-secondary);min-width:35px;text-align:right;">${ind.label}</div></div></div>`;
+    }).join('');
+
+    const existingModal = document.getElementById('targetModal');
+    if (existingModal) existingModal.remove();
+    document.body.insertAdjacentHTML('beforeend', `<div class="modal fade" id="targetModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content" style="background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border-color);"><div class="modal-header" style="border-bottom:1px solid var(--border-color);"><h5 class="modal-title">${target.target_name}</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row mb-4"><div class="col-md-4 text-center"><div style="position:relative;width:140px;height:140px;margin:0 auto;"><canvas id="modalGauge"></canvas><div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;"><div style="font-size:2rem;font-weight:800;color:${scoreColor};">${score !== null ? score : '?'}</div><div style="font-size:0.75rem;color:var(--text-secondary);">/ 100</div></div></div><div style="margin-top:8px;"><span class="status-badge" style="background:${target.position_color}22;color:${target.position_color};font-size:1rem;">${target.market_position}</span></div></div><div class="col-md-8"><div class="strategy-box" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-color);"><div style="color:var(--text-secondary);font-size:0.85rem;">建议策略</div><div class="action" style="color:${getStrategyColor(target.strategy?.action)};">${target.strategy?.icon || ''} ${target.strategy?.action || '--'}</div><div class="description">${target.strategy?.description || ''}</div><div class="mt-2"><span style="font-size:0.85rem;">当前价格: </span><span style="font-size:1.1rem;font-weight:600;">${target.current_price ? formatNumber(target.current_price) : '--'}</span></div></div></div></div><h6 style="color:var(--text-secondary);margin-bottom:12px;">指标详情</h6>${indicatorsHtml}<div class="formula-box mt-3"><div class="formula-text">${target.formula}</div><div class="formula-detail">${target.formula_detail}</div></div></div></div></div></div>`);
+    const modal = new bootstrap.Modal(document.getElementById('targetModal'));
+    modal.show();
+    document.getElementById('targetModal').addEventListener('shown.bs.modal', function() { setTimeout(() => createGauge('modalGauge', score), 100); });
+}
+
+async function fetchData(isRefresh = false) {
+    if (appState.isRefreshing) return;
+    appState.isRefreshing = true;
+    const btn = document.getElementById('refreshBtn');
+    btn.classList.add('loading'); btn.disabled = true;
+    if (!appState.data) {
+        document.getElementById('loadingState').classList.remove('d-none');
+        document.getElementById('errorState').classList.add('d-none');
+        document.getElementById('dashboardContent').classList.add('d-none');
+    } else { document.getElementById('updateTime').textContent = '刷新中...'; }
+    try {
+        const endpoint = isRefresh ? getApiUrl('/refresh') : getApiUrl('/data');
+        const response = await fetch(endpoint);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (data.success) renderDashboard(data);
+        else showError(data.error || '获取数据失败');
+    } catch (err) { showError('网络错误: ' + err.message); }
+    finally { appState.isRefreshing = false; btn.classList.remove('loading'); btn.disabled = false; }
+}
+
+function refreshData() { fetchData(true); }
+
+function showError(msg) {
+    document.getElementById('loadingState').classList.add('d-none');
+    document.getElementById('errorState').classList.remove('d-none');
+    document.getElementById('dashboardContent').classList.add('d-none');
+    document.getElementById('errorMessage').textContent = msg || '无法获取市场数据，请检查网络连接后重试';
+}
+
+function toggleFormula() {
+    const content = document.getElementById('formulaContent');
+    if (content.style.maxHeight) content.style.maxHeight = null;
+    else content.style.maxHeight = content.scrollHeight + 'px';
+}
+
+function startAutoRefresh() {
+    if (appState.autoRefreshInterval) clearInterval(appState.autoRefreshInterval);
+    appState.autoRefreshInterval = setInterval(() => fetchData(false), 5 * 60 * 1000);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // 从 URL 参数读取 API 地址
+    const params = new URLSearchParams(window.location.search);
+    const apiUrl = params.get('api');
+    if (apiUrl) { appState.apiBase = apiUrl; document.getElementById('apiUrlInput').value = apiUrl; }
+    fetchData(false);
+    startAutoRefresh();
+});
+</script>
+</body>
+</html>

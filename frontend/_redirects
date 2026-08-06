@@ -1,0 +1,2 @@
+# 将 /api/* 请求转发到 Worker
+/api/* https://nasdaq-indicator.your-worker.workers.dev/api/:splat 200
