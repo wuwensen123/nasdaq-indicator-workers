@@ -33,23 +33,27 @@ export class Fetcher {
 
   // ========== Fear & Greed ==========
   async getFearGreed() {
-    // 尝试 alternative.me API（对 Workers 友好）
+    // 方案1: alternative.me（加密货币 Fear & Greed，对 Workers 友好）
     try {
       const d = await fetchJSON('https://api.alternative.me/fng/?limit=1');
       const score = d?.data?.[0]?.value;
       if (score != null) return { value: round(parseFloat(score)), label: this._fgLabel(parseFloat(score)), source: 'alternative.me', updated_at: now() };
     } catch {}
+    // 方案2: CNN API（可能被 Workers 屏蔽）
     try {
       const d = await fetchJSON('https://production.dataviz.cnn.io/index/fearandgreed/graphdata');
       const score = d?.fear_and_greed?.score;
-      if (score != null) return { value: round(score), label: this._fgLabel(score), source: 'CNN API', updated_at: now() };
+      if (score != null) return { value: round(score), label: this._fgLabel(score), source: 'CNN', updated_at: now() };
     } catch {}
+    // 方案3: 从 VIX 估算
     try {
-      const html = await fetchText('https://money.cnn.com/data/fear-and-greed/');
-      const m = html.match(/fear.?greed.*?(\d{1,3})/i) || html.match(/(\d{1,3})\s*\/\s*100\s*(?:Fear|Greed|Neutral)/i);
-      if (m) { const v = parseFloat(m[1]); return { value: v, label: this._fgLabel(v), source: 'CNN Money', updated_at: now() }; }
+      const v = await this.getVIX();
+      if (v?.value) {
+        const estimated = Math.max(0, Math.min(100, 100 - (v.value - 10) * 3.33));
+        return { value: round(estimated), label: this._fgLabel(estimated), source: '根据VIX估算', updated_at: now() };
+      }
     } catch {}
-    return { value: null, label: '未知', source: 'alternative.me', updated_at: now() };
+    return { value: null, label: '未知', source: 'CNN', updated_at: now() };
   }
   _fgLabel(v) {
     if (v <= 25) return '极度恐惧'; if (v <= 40) return '恐惧'; if (v <= 60) return '中性'; if (v <= 75) return '贪婪';
