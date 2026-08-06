@@ -7,6 +7,9 @@
 import { Fetcher } from './fetchers.js';
 import { Analyzer } from './analyzer.js';
 
+const fetcher = new Fetcher();
+const analyzer = new Analyzer();
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
