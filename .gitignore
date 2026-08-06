@@ -1,4 +1,4 @@
 node_modules/
 .env
 wrangler.toml
-*.log
+*.log.wrangler/
