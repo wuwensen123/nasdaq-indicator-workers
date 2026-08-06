@@ -71,9 +71,15 @@ export class Fetcher {
 
   // ========== Put/Call Ratio ==========
   async getPutCallRatio() {
-    // 尝试从 Yahoo Finance SPY 期权链估算
+    // 尝试从 CBOE 获取实时数据
     try {
-      const d = await fetchJSON('https://query2.finance.yahoo.com/v7/finance/options/SPY');
+      const d = await fetchJSON('https://cdn.cboe.com/api/global/us_statistics/trading_summary_current.json');
+      const pc = d?.data?.put_call_ratio;
+      if (pc != null && pc > 0.1 && pc < 5) return { value: round(pc), label: this._pcLabel(pc), source: 'CBOE', updated_at: now() };
+    } catch {}
+    // 从 Yahoo Finance SPY 期权数据估算
+    try {
+      const d = await fetchJSON('https://query2.finance.yahoo.com/v7/finance/options/SPY?formatted=true&lang=en-US&region=US');
       const opt = d?.optionChain?.result?.[0]?.options?.[0];
       if (opt) {
         const calls = (opt.calls || []).reduce((s, c) => s + (c.volume || 0), 0);
@@ -84,18 +90,12 @@ export class Fetcher {
         }
       }
     } catch {}
-    // 备用: 从 CBOE 获取
+    // 从 VIX 估算
     try {
-      const d = await fetchJSON('https://cdn.cboe.com/api/global/us_statistics/trading_summary_current.json');
-      const pc = d?.data?.put_call_ratio;
-      if (pc != null && pc > 0.1 && pc < 5) return { value: round(pc), label: this._pcLabel(pc), source: 'CBOE', updated_at: now() };
-    } catch {}
-    // 备用: 从 VIX 估算
-    try {
-      const vix = await this.getVIX();
-      if (vix?.value) {
-        const estimated = 0.4 + (vix.value - 10) * 0.03;
-        if (estimated > 0.1 && estimated < 5) return { value: round(estimated), label: this._pcLabel(estimated), source: '根据VIX估算', updated_at: now() };
+      const v = await this.getVIX();
+      if (v?.value) {
+        const estimated = 0.4 + (v.value - 10) * 0.03;
+        return { value: round(estimated), label: this._pcLabel(estimated), source: '根据VIX估算', updated_at: now() };
       }
     } catch {}
     return { value: null, label: '未知', source: 'CBOE', updated_at: now() };
