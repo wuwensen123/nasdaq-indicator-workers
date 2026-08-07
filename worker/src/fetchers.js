@@ -154,19 +154,53 @@ export class Fetcher {
 
   // ========== PE Ratio ==========
   async getPERatio(symbol, name = '') {
-    // 方案1: Yahoo Finance
+    // 方案1: Yahoo Finance v10 quoteSummary（加 Referer 头）
     try {
-      const summary = await fetchJSON(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=summaryDetail`);
+      const summary = await fetchJSONWithHeaders(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=summaryDetail`, {
+        'Referer': 'https://finance.yahoo.com/',
+      });
       const pe = summary?.quoteSummary?.result?.[0]?.summaryDetail?.trailingPE?.raw;
       if (pe != null && pe > 0 && pe < 200) return { value: round(pe), source: 'Yahoo Finance', updated_at: now(), name };
     } catch {}
-    // 方案2: 腾讯财经（适用于中国 A 股）
+    // 方案2: Yahoo Finance v6/v7 quote（不同端点）
+    try {
+      const quote = await fetchJSONWithHeaders(`https://query1.finance.yahoo.com/v6/finance/quote?symbols=${encodeURIComponent(symbol)}`, {
+        'Referer': 'https://finance.yahoo.com/',
+      });
+      const pe = quote?.quoteResponse?.result?.[0]?.trailingPE;
+      if (pe != null && pe > 0 && pe < 200) return { value: round(pe), source: 'Yahoo Finance', updated_at: now(), name };
+    } catch {}
+    // 方案3: 从 v8/chart API 的 meta 中提取（已验证可用）
+    try {
+      const chart = await fetchJSONWithHeaders(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1mo&interval=1d`, {
+        'Referer': 'https://finance.yahoo.com/',
+      });
+      const meta = chart?.chart?.result?.[0]?.meta;
+      if (meta?.trailingPE) {
+        const pe = meta.trailingPE;
+        if (pe > 0 && pe < 200) return { value: round(pe), source: 'Yahoo Finance', updated_at: now(), name };
+      }
+    } catch {}
+    // 方案3: worldperatio.com（QQQ/VOO 专用）
+    try {
+      let url = '';
+      if (symbol === 'QQQ') url = 'https://worldperatio.com/index/nasdaq-100/';
+      else if (symbol === 'VOO') url = 'https://worldperatio.com/index/sp-500/';
+      if (url) {
+        const html = await fetchText(url);
+        const m = html.match(/P\/E\s*Ratio:\s*<[^>]*>([0-9.]+)<\/b>/i);
+        if (m) {
+          const pe = parseFloat(m[1]);
+          if (pe > 5 && pe < 100) return { value: round(pe), source: 'worldperatio.com', updated_at: now(), name };
+        }
+      }
+    } catch {}
+    // 方案4: 腾讯财经（适用于中国 A 股）
     try {
       const code = symbol.replace('.SS', '').replace('.SZ', '');
       const market = symbol.endsWith('.SS') ? 'sh' : 'sz';
       const text = await fetchText(`https://qt.gtimg.cn/q=${market}${code}`);
       const parts = text.split('~');
-      // 腾讯 API 字段 40（1-indexed）是 PE
       if (parts.length >= 41) {
         const pe = parseFloat(parts[39]);
         if (!isNaN(pe) && pe > 0 && pe < 200) {
