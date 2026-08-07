@@ -281,7 +281,16 @@ export class Fetcher {
       const timestamps = result.timestamp || [];
       const adjclose = result.indicators?.adjclose?.[0]?.adjclose || [];
       const rawclose = result.indicators?.quote?.[0]?.close || [];
-      // 分红数据: { timestamp: { amount } }
+      // 优先用 adjclose，回退到 rawclose，过滤 null/0
+      const prices = [];
+      const dates = [];
+      for (let i = 0; i < timestamps.length; i++) {
+        let p = adjclose[i] != null ? adjclose[i] : rawclose[i];
+        if (p == null || p <= 0) continue; // 跳过无效价格
+        prices.push(p);
+        dates.push(new Date(timestamps[i] * 1000).toISOString().slice(0, 10));
+      }
+      // 分红数据
       const divData = result.events?.dividends || {};
       const dividends = {};
       for (const [key, val] of Object.entries(divData)) {
@@ -289,11 +298,7 @@ export class Fetcher {
         const date = new Date(ts).toISOString().slice(0, 10);
         dividends[date] = (dividends[date] || 0) + (val.amount || 0);
       }
-      return {
-        dates: timestamps.map(ts => new Date(ts * 1000).toISOString().slice(0, 10)),
-        prices: adjclose.length ? adjclose : rawclose,
-        dividends,
-      };
+      return { dates, prices, dividends };
     } catch { return { dates: [], prices: [], dividends: {} }; }
   }
 }

@@ -86,6 +86,23 @@ export function runBacktest(config) {
     return map;
   });
 
+  // 构建每个资产的有序日期数组（用于找最近价格）
+  const sortedDates = assets.map(a => [...a.dates].sort());
+
+  // 查找最近的有效价格（优先当日，其次下一个交易日）
+  function findPrice(assetIdx, date) {
+    if (priceMaps[assetIdx][date]) return priceMaps[assetIdx][date];
+    const dates = sortedDates[assetIdx];
+    let lo = 0, hi = dates.length - 1, ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (dates[mid] >= date) { ans = mid; hi = mid - 1; }
+      else lo = mid + 1;
+    }
+    if (ans >= 0) return priceMaps[assetIdx][dates[ans]];
+    return dates.length ? priceMaps[assetIdx][dates[dates.length - 1]] : 0;
+  }
+
   // 构建分红索引: { date: dividendAmount }
   const divMaps = assets.map(a => a.dividends || {});
 
@@ -96,7 +113,7 @@ export function runBacktest(config) {
   for (const date of investDates) {
     for (let i = 0; i < assets.length; i++) {
       const investAmt = totalAmount * assets[i].weight;
-      const price = priceMaps[i][date];
+      const price = findPrice(i, date);
       if (price && price > 0) {
         shares[i] += investAmt / price;
         cashflows.push(-investAmt);
@@ -108,7 +125,7 @@ export function runBacktest(config) {
   // 分红再投资
   for (let i = 0; i < assets.length; i++) {
     for (const [date, divAmt] of Object.entries(divMaps[i])) {
-      const price = priceMaps[i][date];
+      const price = findPrice(i, date);
       if (price && price > 0) {
         shares[i] += shares[i] * divAmt / price;
       }
@@ -123,7 +140,7 @@ export function runBacktest(config) {
   let finalValue = 0;
   for (let i = 0; i < assets.length; i++) {
     // 找最后一个交易日价格
-    const lastPrice = priceMaps[i][endDateStr] || assets[i].prices[assets[i].prices.length - 1] || 0;
+    const lastPrice = findPrice(i, endDateStr) || 0;
     finalValue += shares[i] * lastPrice;
   }
 
@@ -159,7 +176,7 @@ export function runBacktest(config) {
     // 计算该年末市值
     let yearEndValue = 0;
     for (let i = 0; i < assets.length; i++) {
-      const price = priceMaps[i][yearEnd] || priceMaps[i][allDates.filter(d => d.startsWith(`${year}-`)).pop()] || 0;
+      const price = findPrice(i, yearEnd) || 0;
       yearEndValue += shares[i] * price;
     }
 
