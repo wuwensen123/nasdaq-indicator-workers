@@ -276,18 +276,21 @@ function renderResults(data) {
 
   // 逐年表格
   html += `<div class="card"><div class="card-header">📅 逐年收益明细</div><div class="card-body"><div class="table-responsive"><table class="table table-striped"><thead><tr>
-    <th>年份</th><th>累计投入</th><th>年末总金额</th><th>年收益率</th>
+    <th>年份</th><th>当年投入</th><th>累计投入</th><th>年末总金额</th><th>年收益率</th>
   </tr></thead><tbody>`;
-  for (const y of data.yearly || []) {
+  const yearly = data.yearly || [];
+  for (let idx = 0; idx < yearly.length; idx++) {
+    const y = yearly[idx];
     const color = y.return >= 0 ? 'var(--green)' : 'var(--red)';
+    const prevInv = idx > 0 ? yearly[idx-1].invested : 0;
     html += `<tr>
       <td>${y.year}</td>
+      <td>¥${fmt(y.invested - prevInv)}</td>
       <td>¥${fmt(y.invested)}</td>
       <td>¥${fmt(y.value)}</td>
       <td style="color:${color};">${y.return >= 0 ? '+' : ''}${y.return}%</td>
     </tr>`;
-  }
-  html += `</tbody></table></div></div></div>`;
+  }html += `</tbody></table></div></div></div>`;
 
   // 图表
   html += `<div class="card"><div class="card-header">📈 累计金额曲线</div><div class="card-body"><canvas id="valueChart" height="300"></canvas></div></div>`;

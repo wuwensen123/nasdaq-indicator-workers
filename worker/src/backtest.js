@@ -145,18 +145,22 @@ export function runBacktest(config) {
   const startYear = new Date(startDate).getFullYear();
   const endYear = new Date(endDate).getFullYear();
 
+  // 计算每年初市值
+  let prevYearValue = 0;
   for (let year = startYear; year <= endYear; year++) {
+    const yearStart = `${year}-01-01`;
     const yearEnd = `${year}-12-31`;
+
     // 计算该年投入
     const yearInvested = investDates
       .filter(d => d.startsWith(`${year}-`))
       .length * totalAmount;
 
     // 计算该年末市值
-    let yearValue = 0;
+    let yearEndValue = 0;
     for (let i = 0; i < assets.length; i++) {
       const price = priceMaps[i][yearEnd] || priceMaps[i][allDates.filter(d => d.startsWith(`${year}-`)).pop()] || 0;
-      yearValue += shares[i] * price;
+      yearEndValue += shares[i] * price;
     }
 
     // 累计投入
@@ -164,17 +168,29 @@ export function runBacktest(config) {
       .filter(d => d <= yearEnd)
       .length * totalAmount;
 
-    // 年收益率（简化：该年市值变化 / 该年投入）
-    const yearReturn = yearValue > 0 && yearInvested > 0
-      ? ((yearValue / cumulativeInvested) - 1)
-      : 0;
+    // 年收益率 = (年末市值 - 年初市值 - 当年投入) / (年初市值 + 当年投入)
+    let yearReturn = 0;
+    if (year === startYear) {
+      // 第一年: 从年初开始投入
+      yearReturn = yearEndValue > 0 && yearInvested > 0
+        ? ((yearEndValue / yearInvested) - 1)
+        : 0;
+    } else {
+      const startValue = prevYearValue;
+      yearReturn = startValue > 0
+        ? (yearEndValue - startValue - yearInvested) / (startValue + yearInvested)
+        : 0;
+    }
 
     yearly.push({
       year,
       invested: cumulativeInvested,
-      value: Math.round(yearValue * 100) / 100,
+      yearlyInvested: yearInvested,
+      value: Math.round(yearEndValue * 100) / 100,
       return: Math.round(yearReturn * 10000) / 100,
     });
+
+    prevYearValue = yearEndValue;
   }
 
   return {
