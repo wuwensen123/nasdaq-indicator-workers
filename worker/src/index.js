@@ -93,14 +93,21 @@ async function fetchFreshData() {
   const targetsData = {};
   const results = [];
 
+  // 先并行获取所有 PE 数据（避免被 Yahoo Finance 阻塞）
+  const peResults = await Promise.all(targets.map(t =>
+    fetcher.getPERatio(t.symbol, t.name)
+  ));
+  for (let i = 0; i < targets.length; i++) {
+    targetsData[targets[i].id] = {
+      name: targets[i].name, symbol: targets[i].symbol,
+      pe_ratio: peResults[i].value, pe_data: peResults[i],
+    };
+  }
+
   for (const t of targets) {
     const tech = await fetcher.getTechnicalIndicators(t.symbol);
-    const pe = await fetcher.getPERatio(t.symbol, t.name);
-    targetsData[t.id] = {
-      name: t.name, symbol: t.symbol,
-      current_price: tech.current_price,
-      pe_ratio: pe.value, technical: tech, pe_data: pe,
-    };
+    targetsData[t.id].current_price = tech.current_price;
+    targetsData[t.id].technical = tech;
   }
 
   for (const t of targets) {

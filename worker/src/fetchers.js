@@ -152,36 +152,40 @@ export class Fetcher {
     return { value: null, source: 'multpl.com', updated_at: now() };
   }
 
-  // ========== PE Ratio ==========
+    // ========== PE Ratio ==========
   async getPERatio(symbol, name = '') {
-    // 方案1: Yahoo Finance v10 quoteSummary（加 Referer 头）
+    // 中国A股: 先用腾讯财经
+    if (symbol.endsWith('.SS') || symbol.endsWith('.SZ')) {
+      try {
+        const code = symbol.replace('.SS', '').replace('.SZ', '');
+        const market = symbol.endsWith('.SS') ? 'sh' : 'sz';
+        const text = await fetchText('https://qt.gtimg.cn/q=' + market + code);
+        const parts = text.split('~');
+        if (parts.length >= 41) {
+          const pe = parseFloat(parts[39]);
+          if (!isNaN(pe) && pe > 0 && pe < 200) {
+            return { value: round(pe), source: '腾讯财经', updated_at: now(), name };
+          }
+        }
+      } catch {}
+    }
+    // Yahoo Finance v10
     try {
-      const summary = await fetchJSONWithHeaders(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=summaryDetail`, {
+      const summary = await fetchJSONWithHeaders('https://query1.finance.yahoo.com/v10/finance/quoteSummary/' + encodeURIComponent(symbol) + '?modules=summaryDetail', {
         'Referer': 'https://finance.yahoo.com/',
       });
       const pe = summary?.quoteSummary?.result?.[0]?.summaryDetail?.trailingPE?.raw;
       if (pe != null && pe > 0 && pe < 200) return { value: round(pe), source: 'Yahoo Finance', updated_at: now(), name };
     } catch {}
-    // 方案2: Yahoo Finance v6/v7 quote（不同端点）
+    // Yahoo Finance v6
     try {
-      const quote = await fetchJSONWithHeaders(`https://query1.finance.yahoo.com/v6/finance/quote?symbols=${encodeURIComponent(symbol)}`, {
+      const quote = await fetchJSONWithHeaders('https://query1.finance.yahoo.com/v6/finance/quote?symbols=' + encodeURIComponent(symbol), {
         'Referer': 'https://finance.yahoo.com/',
       });
       const pe = quote?.quoteResponse?.result?.[0]?.trailingPE;
       if (pe != null && pe > 0 && pe < 200) return { value: round(pe), source: 'Yahoo Finance', updated_at: now(), name };
     } catch {}
-    // 方案3: 从 v8/chart API 的 meta 中提取（已验证可用）
-    try {
-      const chart = await fetchJSONWithHeaders(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1mo&interval=1d`, {
-        'Referer': 'https://finance.yahoo.com/',
-      });
-      const meta = chart?.chart?.result?.[0]?.meta;
-      if (meta?.trailingPE) {
-        const pe = meta.trailingPE;
-        if (pe > 0 && pe < 200) return { value: round(pe), source: 'Yahoo Finance', updated_at: now(), name };
-      }
-    } catch {}
-    // 方案3: worldperatio.com（QQQ/VOO 专用）
+    // worldperatio.com (QQQ/VOO)
     try {
       let url = '';
       if (symbol === 'QQQ') url = 'https://worldperatio.com/index/nasdaq-100/';
@@ -195,23 +199,9 @@ export class Fetcher {
         }
       }
     } catch {}
-    // 方案4: 腾讯财经（适用于中国 A 股）
-    try {
-      const code = symbol.replace('.SS', '').replace('.SZ', '');
-      const market = symbol.endsWith('.SS') ? 'sh' : 'sz';
-      const text = await fetchText(`https://qt.gtimg.cn/q=${market}${code}`);
-      const parts = text.split('~');
-      if (parts.length >= 41) {
-        const pe = parseFloat(parts[39]);
-        if (!isNaN(pe) && pe > 0 && pe < 200) {
-          return { value: round(pe), source: '腾讯财经', updated_at: now(), name };
-        }
-      }
-    } catch {}
     return { value: null, source: 'Yahoo Finance', updated_at: now(), name };
   }
-
-  // ========== 技术指标（RSI, MA, MACD） ==========
+// ========== 技术指标（RSI, MA, MACD） ==========
   async getTechnicalIndicators(symbol, period = '1y') {
     const result = { current_price: null, rsi: null, ma200: null, ma200_pct: null, ma50: null, ma50_pct: null, macd: null, macd_signal: null, high_52w: null, low_52w: null, pct_from_52w_high: null, source: 'Yahoo Finance + 计算', updated_at: now() };
     try {
