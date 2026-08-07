@@ -268,6 +268,34 @@ export class Fetcher {
     } catch {}
     return result;
   }
+
+  // ========== 历史价格（含分红，用于定投回测） ==========
+  async getHistoricalPrices(symbol, startDate, endDate) {
+    try {
+      const start = Math.floor(new Date(startDate).getTime() / 1000);
+      const end = Math.floor(new Date(endDate).getTime() / 1000);
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${start}&period2=${end}&interval=1d&events=div%2Csplit&includeAdjustedClose=true`;
+      const d = await fetchJSONWithHeaders(url, { 'Referer': 'https://finance.yahoo.com/' });
+      const result = d.chart?.result?.[0];
+      if (!result) return { dates: [], prices: [], dividends: {} };
+      const timestamps = result.timestamp || [];
+      const adjclose = result.indicators?.adjclose?.[0]?.adjclose || [];
+      const rawclose = result.indicators?.quote?.[0]?.close || [];
+      // 分红数据: { timestamp: { amount } }
+      const divData = result.events?.dividends || {};
+      const dividends = {};
+      for (const [key, val] of Object.entries(divData)) {
+        const ts = parseInt(key) * 1000;
+        const date = new Date(ts).toISOString().slice(0, 10);
+        dividends[date] = (dividends[date] || 0) + (val.amount || 0);
+      }
+      return {
+        dates: timestamps.map(ts => new Date(ts * 1000).toISOString().slice(0, 10)),
+        prices: adjclose.length ? adjclose : rawclose,
+        dividends,
+      };
+    } catch { return { dates: [], prices: [], dividends: {} }; }
+  }
 }
 
 // ========== 工具函数 ==========

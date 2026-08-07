@@ -6,6 +6,7 @@
 
 import { Fetcher } from './fetchers.js';
 import { Analyzer } from './analyzer.js';
+import { runBacktest } from './backtest.js';
 
 const fetcher = new Fetcher();
 const analyzer = new Analyzer();
@@ -184,6 +185,30 @@ export default {
         return json(freshData);
       } catch (e) {
         return error(e.message);
+      }
+    }
+
+    // 定投回测 API
+    if (path === '/api/backtest' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const { assets, amount, frequency, startDate, endDate } = body;
+        if (!assets || !assets.length || !amount || !startDate || !endDate) {
+          return json({ success: false, error: '缺少参数' }, 400);
+        }
+        // 为每个资产获取历史数据
+        const assetData = [];
+        for (const a of assets) {
+          const hist = await fetcher.getHistoricalPrices(a.symbol, startDate, endDate);
+          if (!hist.dates || !hist.dates.length) {
+            return json({ success: false, error: `无法获取 ${a.symbol} 的历史数据` }, 400);
+          }
+          assetData.push({ ...a, ...hist });
+        }
+        const result = runBacktest({ assets: assetData, amount, frequency, startDate, endDate });
+        return json({ success: true, ...result });
+      } catch (e) {
+        return json({ success: false, error: e.message }, 500);
       }
     }
 
