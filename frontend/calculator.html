@@ -93,10 +93,10 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
           <div class="mb-3">
             <label class="form-label">预设组合</label>
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
-              <button class="preset-btn" onclick="loadPreset('allweather')">🌤 全天候</button>
-              <button class="preset-btn" onclick="loadPreset('permanent')">🔒 永久组合</button>
-              <button class="preset-btn" onclick="loadPreset('buffett')">🧑 巴菲特退休</button>
-              <button class="preset-btn" onclick="loadPreset('custom')">✏️ 自定义</button>
+              <button class="preset-btn" onclick="loadPreset('allweather',this)">🌤 全天候</button>
+              <button class="preset-btn" onclick="loadPreset('permanent',this)">🔒 永久组合</button>
+              <button class="preset-btn" onclick="loadPreset('buffett',this)">🧑 巴菲特退休</button>
+              <button class="preset-btn" onclick="loadPreset('custom',this)">✏️ 自定义</button>
             </div>
           </div>
           <div class="mb-3">
@@ -115,11 +115,12 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
                   <option value="^HSI">^HSI 恒生指数</option>
                   <option value="000300.SS">000300.SS 沪深300</option>
                 </select>
-                <input type="number" class="form-control" style="width:80px" value="100" min="1" max="100" placeholder="%">
+                <input type="number" class="form-control" style="width:80px" value="100" min="1" max="100" placeholder="%" oninput="updateWeightTotal()">
                 <span style="color:var(--text-secondary);font-size:0.85rem;">%</span>
               </div>
             </div>
             <button class="btn btn-outline-secondary btn-sm mt-2" onclick="addAsset()">+ 添加标的</button>
+            <div id="weightTotal" style="margin-top:8px;font-size:0.85rem;color:var(--green);">总比例: 100%</div>
           </div>
           <div class="mb-3">
             <label class="form-label">自定义股票代码</label>
@@ -169,9 +170,9 @@ const PRESETS = {
   ]},
 };
 
-function loadPreset(name) {
+function loadPreset(name, btn) {
   document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
+  btn.classList.add('active');
   if (name === 'custom') return;
   const preset = PRESETS[name];
   document.getElementById('assetList').innerHTML = '';
@@ -181,6 +182,25 @@ function loadPreset(name) {
 }
 
 function addAsset() { addAssetRow('VOO', 100); }
+
+function updateWeightTotal() {
+  const el = document.getElementById('weightTotal');
+  if (!el) return;
+  let total = 0;
+  document.querySelectorAll('.asset-row input[type=number]').forEach(input => {
+    total += parseFloat(input.value) || 0;
+  });
+  const rounded = Math.round(total);
+  if (rounded === 100) {
+    el.textContent = `总比例: 100%`;
+    el.style.color = 'var(--green)';
+    el.style.fontWeight = 'normal';
+  } else {
+    el.textContent = `总比例: ${total.toFixed(1)}% ⚠️ 建议调整为100%（将自动归一化）`;
+    el.style.color = 'var(--red)';
+    el.style.fontWeight = 'bold';
+  }
+}
 
 function addAssetRow(symbol, weight) {
   const div = document.createElement('div');
@@ -201,11 +221,12 @@ function addAssetRow(symbol, weight) {
       <option value="^HSI">^HSI 恒生指数</option>
       <option value="000300.SS">沪深300</option>
     </datalist>
-    <input type="number" class="form-control" style="width:80px" value="${weight}" min="1" max="100" placeholder="%">
+    <input type="number" class="form-control" style="width:80px" value="${weight}" min="1" max="100" placeholder="%" oninput="updateWeightTotal()">
     <span style="color:var(--text-secondary);font-size:0.85rem;">%</span>
-    <button class="btn-remove" onclick="this.parentElement.remove()">×</button>
+    <button class="btn-remove" onclick="this.parentElement.remove();updateWeightTotal()">×</button>
   `;
   document.getElementById('assetList').appendChild(div);
+  updateWeightTotal();
 }
 
 async function checkSymbol() {
