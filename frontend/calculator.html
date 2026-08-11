@@ -30,7 +30,7 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
 .btn-outline-secondary { border-color: var(--border-color); color: var(--text-primary); }
 .btn-outline-secondary:hover { background: rgba(0,0,0,0.03); border-color: var(--blue); color: var(--blue); }
 .result-card { background: linear-gradient(135deg, #f0f2f5 0%, #e6e9ef 50%, #dce0e8 100%); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; text-align: center; }
-.result-card .value { font-size: 2rem; font-weight: 700; }
+.result-card .value { font-size: 1.6rem; font-weight: 700; word-break: break-all; overflow-wrap: break-word; }
 .result-card .label { font-size: 0.85rem; color: var(--text-secondary); }
 .table { color: var(--text-primary); font-size: 0.9rem; }
 .table th { border-color: var(--border-color); color: var(--text-secondary); font-weight: 500; }
@@ -368,7 +368,12 @@ function renderResults(data) {
   }, 100);
 }
 
-function fmt(n) { return (n || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmt(n) {
+  n = n || 0;
+  if (Math.abs(n) >= 100000000) return (n / 100000000).toFixed(2) + '亿';
+  if (Math.abs(n) >= 10000) return (n / 10000).toFixed(2) + '万';
+  return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 </script>
 </body>
 </html>
