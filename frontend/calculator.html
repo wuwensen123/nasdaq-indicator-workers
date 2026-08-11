@@ -17,11 +17,13 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
 .header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); border-bottom: 1px solid var(--border-color); padding: 20px 0; }
 .header h1 { font-size: 1.5rem; font-weight: 700; margin: 0; background: linear-gradient(90deg, #79c0ff, #d2a8ff, #f088f0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
 .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; margin-bottom: 16px; }
-.card-header { background: transparent; border-bottom: 1px solid var(--border-color); padding: 12px 16px; font-weight: 600; }
+.card-header { background: transparent; border-bottom: 1px solid var(--border-color); padding: 12px 16px; font-weight: 600; color: var(--text-primary); }
 .card-body { padding: 16px; }
 .form-label { color: var(--text-secondary); font-size: 0.9rem; }
 .form-control, .form-select { background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-primary); }
 .form-control:focus, .form-select:focus { background: rgba(255,255,255,0.08); border-color: var(--blue); color: var(--text-primary); box-shadow: none; }
+.form-select option { background: #1a1a2e; color: var(--text-primary); }
+input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); }
 .form-control::placeholder { color: #6c757d; }
 .btn-primary { background: linear-gradient(135deg, #238636, #2ea043); border: none; color: white; font-weight: 500; }
 .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(46, 160, 67, 0.3); }
@@ -127,7 +129,7 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
             </div>
             <div id="symbolCheckResult" style="font-size:0.85rem;margin-top:4px;"></div>
           </div>
-          <button class="btn btn-primary w-100" onclick="runBacktest()">
+          <button class="btn btn-primary w-100" id="runBacktestBtn" onclick="runBacktest()">
             <span id="loadingSpinner" class="spinner-border spinner-border-sm me-1"></span>
             🚀 开始回测
           </button>
@@ -236,12 +238,13 @@ async function checkSymbol() {
 async function runBacktest() {
   const spinner = document.getElementById('loadingSpinner');
   spinner.classList.add('active');
-  const btn = event.target;
+  const btn = document.getElementById('runBacktestBtn');
   btn.disabled = true;
 
   const assets = [];
   document.querySelectorAll('.asset-row').forEach(row => {
-    const symbol = row.querySelector('input[type=text]').value.trim().toUpperCase();
+    const symbolInput = row.querySelector('input[type=text]') || row.querySelector('select');
+    const symbol = (symbolInput.value || '').trim().toUpperCase();
     const weight = parseFloat(row.querySelector('input[type=number]').value) || 0;
     if (symbol && weight > 0) assets.push({ symbol, weight });
   });
