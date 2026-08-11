@@ -1,2 +1,2 @@
 # Cloudflare Pages → Worker 代理
-/api/* https://nasdaq-indicator.morisze.workers.dev/api/:splat 200
+/api/* https://api.motris.dpdns.org/api/:splat 200

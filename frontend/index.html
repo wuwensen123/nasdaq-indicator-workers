@@ -129,7 +129,7 @@
                 <div class="subtitle">基于多维度市场指标的智能定投决策系统</div>
                 <div class="api-url-bar">
                     <span style="color:var(--text-primary);font-size:0.8rem;">API:</span>
-                    <input type="text" id="apiUrlInput" value="https://nasdaq-indicator.morisze.workers.dev/api" placeholder="Worker URL">
+                    <input type="text" id="apiUrlInput" value="https://api.motris.dpdns.org/api" placeholder="Worker URL">
                     <button onclick="updateApiUrl()">更新</button>
                 </div>
             </div>
@@ -217,7 +217,7 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-let appState = { data: null, charts: [], isRefreshing: false, autoRefreshInterval: null, apiBase: 'https://nasdaq-indicator.morisze.workers.dev/api' };
+let appState = { data: null, charts: [], isRefreshing: false, autoRefreshInterval: null, apiBase: 'https://api.motris.dpdns.org/api' };
 
 function getApiUrl(path) { return appState.apiBase + path; }
 
