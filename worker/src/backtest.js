@@ -162,8 +162,8 @@ export function runBacktest(config) {
   const startYear = new Date(startDate).getFullYear();
   const endYear = new Date(endDate).getFullYear();
 
-  // 计算每年初市值
-  let prevYearValue = 0;
+  // 逐年计算，跟踪每年底的累计份额
+  const cumShares = assets.map(() => 0);
   for (let year = startYear; year <= endYear; year++) {
     const yearStart = `${year}-01-01`;
     const yearEnd = `${year}-12-31`;
@@ -173,11 +173,21 @@ export function runBacktest(config) {
       .filter(d => d.startsWith(`${year}-`))
       .length * totalAmount;
 
-    // 计算该年末市值
+    // 计算该年新增的份额（按该年投资日期逐笔买入）
+    for (const date of investDates) {
+      if (!date.startsWith(`${year}-`)) continue;
+      for (let i = 0; i < assets.length; i++) {
+        const investAmt = totalAmount * assets[i].weight;
+        const price = findPrice(i, date);
+        if (price && price > 0) cumShares[i] += investAmt / price;
+      }
+    }
+
+    // 计算该年末市值（用累计份额 × 年末价格）
     let yearEndValue = 0;
     for (let i = 0; i < assets.length; i++) {
       const price = findPrice(i, yearEnd) || 0;
-      yearEndValue += shares[i] * price;
+      yearEndValue += cumShares[i] * price;
     }
 
     // 累计投入
@@ -188,12 +198,12 @@ export function runBacktest(config) {
     // 年收益率 = (年末市值 - 年初市值 - 当年投入) / (年初市值 + 当年投入)
     let yearReturn = 0;
     if (year === startYear) {
-      // 第一年: 从年初开始投入
-      yearReturn = yearEndValue > 0 && yearInvested > 0
-        ? ((yearEndValue / yearInvested) - 1)
+      // 第一年: 年初市值=0，收益率用年末总值/累计投入-1
+      yearReturn = cumulativeInvested > 0
+        ? ((yearEndValue / cumulativeInvested) - 1)
         : 0;
     } else {
-      const startValue = prevYearValue;
+      const startValue = yearly[yearly.length - 1].value;
       yearReturn = startValue > 0
         ? (yearEndValue - startValue - yearInvested) / (startValue + yearInvested)
         : 0;
@@ -206,8 +216,6 @@ export function runBacktest(config) {
       value: Math.round(yearEndValue * 100) / 100,
       return: Math.round(yearReturn * 10000) / 100,
     });
-
-    prevYearValue = yearEndValue;
   }
 
   return {
