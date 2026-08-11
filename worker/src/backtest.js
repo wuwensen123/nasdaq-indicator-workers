@@ -218,12 +218,76 @@ export function runBacktest(config) {
     });
   }
 
+  // 计算最大回撤、夏普比率等指标
+  // 跟踪每个投资日期的组合市值
+  const portfolioValues = [];
+  const portfolioDates = [];
+  const tempShares = assets.map(() => 0);
+  for (const date of investDates) {
+    for (let i = 0; i < assets.length; i++) {
+      const investAmt = totalAmount * assets[i].weight;
+      const price = findPrice(i, date);
+      if (price && price > 0) tempShares[i] += investAmt / price;
+    }
+    let value = 0;
+    for (let i = 0; i < assets.length; i++) {
+      const price = findPrice(i, date) || 0;
+      value += tempShares[i] * price;
+    }
+    portfolioValues.push(value);
+    portfolioDates.push(date);
+  }
+
+  // 最大回撤
+  let peak = 0, maxDrawdown = 0;
+  for (const v of portfolioValues) {
+    if (v > peak) peak = v;
+    const dd = (peak - v) / peak;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+  }
+
+  // 年化收益序列（用于夏普比率）
+  const annualReturnSeries = yearly
+    .filter(y => y.return !== 0 && y.year > startYear)
+    .map(y => y.return / 100);
+
+  // 年化波动率（基于年收益率的标准差）
+  const avgReturn = annualReturnSeries.length > 0
+    ? annualReturnSeries.reduce((s, r) => s + r, 0) / annualReturnSeries.length
+    : 0;
+  const variance = annualReturnSeries.length > 0
+    ? annualReturnSeries.reduce((s, r) => s + (r - avgReturn) ** 2, 0) / annualReturnSeries.length
+    : 0;
+  const annualVol = Math.sqrt(variance);
+
+  // 夏普比率（假设无风险利率 2%）
+  const riskFreeRate = 0.02;
+  const sharpeRatio = annualVol > 0
+    ? (avgReturn - riskFreeRate) / annualVol
+    : 0;
+
+  // 卡玛比率
+  const calmarRatio = maxDrawdown > 0 && cagr > 0
+    ? cagr / maxDrawdown
+    : 0;
+
+  // 最好/最差年份
+  const yearReturns = yearly.filter(y => y.return !== 0).map(y => y.return);
+  const bestYear = yearReturns.length > 0 ? Math.max(...yearReturns) : 0;
+  const worstYear = yearReturns.length > 0 ? Math.min(...yearReturns) : 0;
+
   return {
     totalInvested: Math.round(totalInvested * 100) / 100,
     finalValue: Math.round(finalValue * 100) / 100,
     multiple: totalInvested > 0 ? Math.round((finalValue / totalInvested) * 100) / 100 : 0,
     cagr: Math.round(cagr * 10000) / 100,
     xirr: Math.round(xirr * 10000) / 100,
+    sharpeRatio: Math.round(sharpeRatio * 100) / 100,
+    maxDrawdown: Math.round(maxDrawdown * 10000) / 100,
+    annualVol: Math.round(annualVol * 10000) / 100,
+    calmarRatio: Math.round(calmarRatio * 100) / 100,
+    bestYear: Math.round(bestYear * 100) / 100,
+    worstYear: Math.round(worstYear * 100) / 100,
     yearly,
   };
 }

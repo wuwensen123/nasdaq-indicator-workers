@@ -334,6 +334,42 @@ function renderResults(data) {
         <div class="value" style="color:${data.xirr >= 0 ? 'var(--green)' : 'var(--red)'};">${data.xirr}%</div>
       </div>
     </div>
+    <div class="col-6 col-md-3">
+      <div class="result-card">
+        <div class="label">夏普比率</div>
+        <div class="value" style="color:${data.sharpeRatio >= 1 ? 'var(--green)' : data.sharpeRatio >= 0 ? 'var(--yellow)' : 'var(--red)'};">${data.sharpeRatio}</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="result-card">
+        <div class="label">最大回撤</div>
+        <div class="value" style="color:var(--red);">${data.maxDrawdown}%</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="result-card">
+        <div class="label">年化波动率</div>
+        <div class="value" style="color:var(--text-primary);">${data.annualVol}%</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="result-card">
+        <div class="label">卡玛比率</div>
+        <div class="value" style="color:${data.calmarRatio >= 1 ? 'var(--green)' : 'var(--yellow)'};">${data.calmarRatio}</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="result-card">
+        <div class="label">最好年份</div>
+        <div class="value" style="color:var(--green);">+${data.bestYear}%</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="result-card">
+        <div class="label">最差年份</div>
+        <div class="value" style="color:var(--red);">${data.worstYear}%</div>
+      </div>
+    </div>
   </div>`;
 
   // 逐年表格
@@ -357,6 +393,7 @@ function renderResults(data) {
   // 图表
   html += `<div class="card"><div class="card-header">📈 累计金额曲线</div><div class="card-body"><canvas id="valueChart" height="300"></canvas></div></div>`;
   html += `<div class="card"><div class="card-header">📊 逐年收益率</div><div class="card-body"><canvas id="returnChart" height="200"></canvas></div></div>`;
+  html += `<div class="card"><div class="card-header">📉 回撤曲线</div><div class="card-body"><canvas id="drawdownChart" height="200"></canvas></div></div>`;
 
   area.innerHTML = html;
 
@@ -369,23 +406,41 @@ function renderResults(data) {
     new Chart(document.getElementById('valueChart'), {
       type: 'line', data: {
         labels: years, datasets: [{
-          label: '总金额', data: values, borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,0.1)', fill: true, tension: 0.3
+          label: '总金额', data: values, borderColor: '#0969da', backgroundColor: 'rgba(9,105,218,0.1)', fill: true, tension: 0.3
         }]
       }, options: { responsive: true, plugins: { legend: { labels: { color: '#1a1a2e' } } },
-        scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#8b949e', callback: v => '¥' + (v/10000).toFixed(0) + '万' } } }
+        scales: { x: { ticks: { color: '#586069' } }, y: { ticks: { color: '#586069', callback: v => '¥' + (v/10000).toFixed(0) + '万' } } }
       }
     });
     new Chart(document.getElementById('returnChart'), {
       type: 'bar', data: {
         labels: years, datasets: [{
           label: '年收益率 %', data: returns,
-          backgroundColor: returns.map(r => r >= 0 ? 'rgba(63,185,80,0.6)' : 'rgba(248,81,73,0.6)'),
-          borderColor: returns.map(r => r >= 0 ? '#3fb950' : '#f85149'), borderWidth: 1
+          backgroundColor: returns.map(r => r >= 0 ? 'rgba(45,164,78,0.6)' : 'rgba(207,34,46,0.6)'),
+          borderColor: returns.map(r => r >= 0 ? '#2da44e' : '#cf222e'), borderWidth: 1
         }]
       }, options: { responsive: true, plugins: { legend: { labels: { color: '#1a1a2e' } } },
-        scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#8b949e', callback: v => v + '%' } } }
+        scales: { x: { ticks: { color: '#586069' } }, y: { ticks: { color: '#586069', callback: v => v + '%' } } }
       }
     });
+    // 回撤曲线
+    const drawdowns = [];
+    let peak = 0;
+    for (const v of values) {
+      if (v > peak) peak = v;
+      drawdowns.push(peak > 0 ? ((v - peak) / peak * 100) : 0);
+    }
+    if (document.getElementById('drawdownChart')) {
+      new Chart(document.getElementById('drawdownChart'), {
+        type: 'line', data: {
+          labels: years, datasets: [{
+            label: '回撤 %', data: drawdowns, borderColor: '#cf222e', backgroundColor: 'rgba(207,34,46,0.1)', fill: true, tension: 0.3
+          }]
+        }, options: { responsive: true, plugins: { legend: { labels: { color: '#1a1a2e' } } },
+          scales: { x: { ticks: { color: '#586069' } }, y: { ticks: { color: '#586069', callback: v => v.toFixed(0) + '%' } } }
+        }
+      });
+    }
   }, 100);
 }
 
