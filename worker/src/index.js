@@ -188,6 +188,22 @@ export default {
       }
     }
 
+    // 检测股票代码是否可用
+    if (path === '/api/check-symbol' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const { symbol } = body;
+        if (!symbol) return json({ success: false, error: '请输入股票代码' }, 400);
+        const hist = await fetcher.getHistoricalPrices(symbol, '2026-01-01', '2026-08-08');
+        if (hist.dates && hist.dates.length > 0) {
+          return json({ success: true, symbol, name: symbol, price: hist.prices[hist.prices.length - 1] });
+        }
+        return json({ success: false, error: '未找到该股票数据' }, 404);
+      } catch (e) {
+        return json({ success: false, error: e.message }, 500);
+      }
+    }
+
     // 定投回测 API
     if (path === '/api/backtest' && request.method === 'POST') {
       try {

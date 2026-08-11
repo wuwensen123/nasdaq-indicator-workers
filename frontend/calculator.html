@@ -119,6 +119,14 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
             </div>
             <button class="btn btn-outline-light btn-sm mt-2" onclick="addAsset()">+ 添加标的</button>
           </div>
+          <div class="mb-3">
+            <label class="form-label">自定义股票代码</label>
+            <div class="d-flex gap-1">
+              <input type="text" class="form-control" id="customSymbol" placeholder="如 AAPL、TSLA、600519.SS" value="">
+              <button class="btn btn-outline-light btn-sm" style="white-space:nowrap;" onclick="checkSymbol()">🔍 检测</button>
+            </div>
+            <div id="symbolCheckResult" style="font-size:0.85rem;margin-top:4px;"></div>
+          </div>
           <button class="btn btn-primary w-100" onclick="runBacktest()">
             <span id="loadingSpinner" class="spinner-border spinner-border-sm me-1"></span>
             🚀 开始回测
@@ -143,7 +151,7 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
 </main>
 
 <script>
-const API_BASE = '/api';
+const API_BASE = 'https://nasdaq-indicator.morisze.workers.dev';
 const PRESETS = {
   allweather: { name: '全天候组合', assets: [
     { symbol: 'VOO', weight: 30 }, { symbol: 'TLT', weight: 40 },
@@ -175,24 +183,54 @@ function addAsset() { addAssetRow('VOO', 100); }
 function addAssetRow(symbol, weight) {
   const div = document.createElement('div');
   div.className = 'asset-row';
+  div.dataset.symbol = symbol;
+  const isCustom = !['QQQ','VOO','SPY','GLD','TLT','IEF','SHY','DBC','^HSI','000300.SS'].includes(symbol);
   div.innerHTML = `
-    <select class="form-select" style="flex:2">
-      <option value="QQQ" ${symbol==='QQQ'?'selected':''}>QQQ 纳斯达克100</option>
-      <option value="VOO" ${symbol==='VOO'?'selected':''}>VOO 标普500</option>
-      <option value="SPY" ${symbol==='SPY'?'selected':''}>SPY 标普500</option>
-      <option value="GLD" ${symbol==='GLD'?'selected':''}>GLD 黄金</option>
-      <option value="TLT" ${symbol==='TLT'?'selected':''}>TLT 长期国债</option>
-      <option value="IEF" ${symbol==='IEF'?'selected':''}>IEF 中期国债</option>
-      <option value="SHY" ${symbol==='SHY'?'selected':''}>SHY 短期国债</option>
-      <option value="DBC" ${symbol==='DBC'?'selected':''}>DBC 商品</option>
-      <option value="^HSI" ${symbol==='^HSI'?'selected':''}>^HSI 恒生指数</option>
-      <option value="000300.SS" ${symbol==='000300.SS'?'selected':''}>沪深300</option>
-    </select>
+    <input type="text" class="form-control" style="flex:2" value="${symbol}" list="presetSymbols" placeholder="股票代码">
+    <datalist id="presetSymbols">
+      <option value="QQQ">QQQ 纳斯达克100</option>
+      <option value="VOO">VOO 标普500</option>
+      <option value="SPY">SPY 标普500</option>
+      <option value="GLD">GLD 黄金</option>
+      <option value="TLT">TLT 长期国债</option>
+      <option value="IEF">IEF 中期国债</option>
+      <option value="SHY">SHY 短期国债</option>
+      <option value="DBC">DBC 商品</option>
+      <option value="^HSI">^HSI 恒生指数</option>
+      <option value="000300.SS">沪深300</option>
+    </datalist>
     <input type="number" class="form-control" style="width:80px" value="${weight}" min="1" max="100" placeholder="%">
     <span style="color:var(--text-secondary);font-size:0.85rem;">%</span>
     <button class="btn-remove" onclick="this.parentElement.remove()">×</button>
   `;
   document.getElementById('assetList').appendChild(div);
+}
+
+async function checkSymbol() {
+  const symbol = document.getElementById('customSymbol').value.trim().toUpperCase();
+  const result = document.getElementById('symbolCheckResult');
+  if (!symbol) { result.textContent = '请输入股票代码'; result.style.color = 'var(--yellow)'; return; }
+  result.textContent = '检测中...';
+  result.style.color = 'var(--text-secondary)';
+  try {
+    const res = await fetch(API_BASE + '/api/check-symbol', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      result.textContent = `✅ ${symbol} 可用 (${data.name})，已添加到标的`;
+      result.style.color = 'var(--green)';
+      addAssetRow(symbol, 100);
+      document.getElementById('customSymbol').value = '';
+    } else {
+      result.textContent = `❌ ${symbol} 不可用: ${data.error || '未找到'}`;
+      result.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    result.textContent = '❌ 检测失败: ' + e.message;
+    result.style.color = 'var(--red)';
+  }
 }
 
 async function runBacktest() {
@@ -203,9 +241,9 @@ async function runBacktest() {
 
   const assets = [];
   document.querySelectorAll('.asset-row').forEach(row => {
-    const symbol = row.querySelector('select').value;
+    const symbol = row.querySelector('input[type=text]').value.trim().toUpperCase();
     const weight = parseFloat(row.querySelector('input[type=number]').value) || 0;
-    if (weight > 0) assets.push({ symbol, weight });
+    if (symbol && weight > 0) assets.push({ symbol, weight });
   });
 
   // 归一化权重
@@ -222,7 +260,7 @@ async function runBacktest() {
   };
 
   try {
-    const res = await fetch(API_BASE + '/backtest', {
+    const res = await fetch(API_BASE + '/api/backtest', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
