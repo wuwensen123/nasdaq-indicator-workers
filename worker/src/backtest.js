@@ -59,9 +59,45 @@ function getInvestDates(frequency, startDate, endDate) {
   return dates;
 }
 
+// 生成再平衡日期
+function getRebalanceDates(frequency, startDate, endDate) {
+  if (frequency === 'none') return [];
+  const dates = [];
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const startStr = startDate.slice(0, 10);
+  const endStr = endDate.slice(0, 10);
+  for (let y = start.getFullYear(); y <= end.getFullYear(); y++) {
+    const candidates = [`${y}-01-01`];
+    if (frequency === 'semi-annual' || frequency === 'quarterly') candidates.push(`${y}-07-01`);
+    if (frequency === 'quarterly') { candidates.push(`${y}-04-01`); candidates.push(`${y}-10-01`); }
+    for (const d of candidates) {
+      if (d >= startStr && d <= endStr) dates.push(d);
+    }
+  }
+  return dates;
+}
+
+// 执行再平衡（按目标权重重新分配份额）
+function applyRebalance(shares, assets, findPrice, date) {
+  let totalValue = 0;
+  const values = [];
+  for (let i = 0; i < assets.length; i++) {
+    const price = findPrice(i, date) || 0;
+    const value = shares[i] * price;
+    values.push(value);
+    totalValue += value;
+  }
+  if (totalValue <= 0) return;
+  for (let i = 0; i < assets.length; i++) {
+    const targetValue = totalValue * assets[i].weight;
+    shares[i] = targetValue / (findPrice(i, date) || 1);
+  }
+}
+
 // 主回测函数
 export function runBacktest(config) {
-  const { assets, amount, frequency, startDate, endDate } = config;
+  const { assets, amount, frequency, startDate, endDate, rebalance } = config;
   // assets: [{ symbol, weight, prices[], dates[], dividends{} }]
   // amount: 每次定投总金额
   // weight: 该标的占比（小数，如 0.5）
@@ -132,11 +168,19 @@ export function runBacktest(config) {
     }
   }
 
+  // 再平衡（在副本上执行）
+  const endDateStr = new Date(endDate).toISOString().slice(0, 10);
+  const rebalShares = [...shares];
+  const rebalanceDates = getRebalanceDates(rebalance || 'none', startDate, endDate);
+  for (const rbDate of rebalanceDates) {
+    if (rbDate > endDateStr) continue;
+    applyRebalance(rebalShares, assets, findPrice, rbDate);
+  }
+
   // 计算总投入
   const totalInvested = cashflows.reduce((s, v) => s + Math.abs(v), 0);
 
   // 计算期末价值
-  const endDateStr = new Date(endDate).toISOString().slice(0, 10);
   let finalValue = 0;
   for (let i = 0; i < assets.length; i++) {
     // 找最后一个交易日价格
@@ -276,6 +320,91 @@ export function runBacktest(config) {
   const bestYear = yearReturns.length > 0 ? Math.max(...yearReturns) : 0;
   const worstYear = yearReturns.length > 0 ? Math.min(...yearReturns) : 0;
 
+  // 再平衡后逐年收益
+  const rebalYearly = [];
+  const rebalCumShares = assets.map(() => 0);
+  for (let year = startYear; year <= endYear; year++) {
+    const yearEnd = `${year}-12-31`;
+    for (const date of investDates) {
+      if (!date.startsWith(`${year}-`)) continue;
+      for (let i = 0; i < assets.length; i++) {
+        const investAmt = totalAmount * assets[i].weight;
+        const price = findPrice(i, date);
+        if (price && price > 0) rebalCumShares[i] += investAmt / price;
+      }
+    }
+    for (let i = 0; i < assets.length; i++) {
+      const divMap = divMaps[i];
+      for (const [date, divAmt] of Object.entries(divMap)) {
+        if (!date.startsWith(`${year}-`)) continue;
+        const price = findPrice(i, date);
+        if (price && price > 0) rebalCumShares[i] += rebalCumShares[i] * divAmt / price;
+      }
+    }
+    for (const rbDate of rebalanceDates) {
+      if (!rbDate.startsWith(`${year}-`)) continue;
+      if (rbDate > yearEnd) continue;
+      applyRebalance(rebalCumShares, assets, findPrice, rbDate);
+    }
+    let yearEndValue = 0;
+    for (let i = 0; i < assets.length; i++) {
+      const price = findPrice(i, yearEnd) || 0;
+      yearEndValue += rebalCumShares[i] * price;
+    }
+    const cumulativeInvested = investDates.filter(d => d <= yearEnd).length * totalAmount;
+    const yearInvested = investDates.filter(d => d.startsWith(`${year}-`)).length * totalAmount;
+    let yearReturn = 0;
+    if (year === startYear) {
+      yearReturn = cumulativeInvested > 0 ? ((yearEndValue / cumulativeInvested) - 1) : 0;
+    } else {
+      const startValue = rebalYearly[rebalYearly.length - 1].value;
+      yearReturn = startValue > 0 ? (yearEndValue - startValue - yearInvested) / (startValue + yearInvested) : 0;
+    }
+    rebalYearly.push({
+      year, invested: cumulativeInvested, yearlyInvested: yearInvested,
+      value: Math.round(yearEndValue * 100) / 100,
+      return: Math.round(yearReturn * 10000) / 100,
+    });
+  }
+
+  // 再平衡后最终指标
+  const rebalCagr = calcCAGR(finalValue, totalInvested, years);
+  const rebalFinalValue = (() => {
+    let v = 0;
+    for (let i = 0; i < assets.length; i++) {
+      v += rebalShares[i] * (findPrice(i, endDateStr) || 0);
+    }
+    return v;
+  })();
+  const rebalCagrVal = calcCAGR(rebalFinalValue, totalInvested, years);
+  const rebalReturns = rebalYearly.filter(y => y.return !== 0 && y.year > startYear).map(y => y.return / 100);
+  const rebalAvgRet = rebalReturns.length > 0 ? rebalReturns.reduce((s, r) => s + r, 0) / rebalReturns.length : 0;
+  const rebalVar = rebalReturns.length > 0 ? rebalReturns.reduce((s, r) => s + (r - rebalAvgRet) ** 2, 0) / rebalReturns.length : 0;
+  const rebalVol = Math.sqrt(rebalVar);
+  const rebalSharpe = rebalVol > 0 ? (rebalAvgRet - 0.02) / rebalVol : 0;
+  // 再平衡后最大回撤
+  const rebalPortValues = [];
+  const rebalTempShares = assets.map(() => 0);
+  for (const date of investDates) {
+    for (let i = 0; i < assets.length; i++) {
+      const investAmt = totalAmount * assets[i].weight;
+      const price = findPrice(i, date);
+      if (price && price > 0) rebalTempShares[i] += investAmt / price;
+    }
+    if (rebalanceDates.includes(date)) {
+      applyRebalance(rebalTempShares, assets, findPrice, date);
+    }
+    let value = 0;
+    for (let i = 0; i < assets.length; i++) value += rebalTempShares[i] * (findPrice(i, date) || 0);
+    rebalPortValues.push(value);
+  }
+  let rebalPeak = 0, rebalDrawdown = 0;
+  for (const v of rebalPortValues) {
+    if (v > rebalPeak) rebalPeak = v;
+    const dd = (rebalPeak - v) / rebalPeak;
+    if (dd > rebalDrawdown) rebalDrawdown = dd;
+  }
+
   return {
     totalInvested: Math.round(totalInvested * 100) / 100,
     finalValue: Math.round(finalValue * 100) / 100,
@@ -289,5 +418,15 @@ export function runBacktest(config) {
     bestYear: Math.round(bestYear * 100) / 100,
     worstYear: Math.round(worstYear * 100) / 100,
     yearly,
+    rebalanced: {
+      finalValue: Math.round(rebalFinalValue * 100) / 100,
+      totalInvested: Math.round(totalInvested * 100) / 100,
+      multiple: totalInvested > 0 ? Math.round((rebalFinalValue / totalInvested) * 100) / 100 : 0,
+      cagr: Math.round(rebalCagrVal * 10000) / 100,
+      sharpeRatio: Math.round(rebalSharpe * 100) / 100,
+      maxDrawdown: Math.round(rebalDrawdown * 10000) / 100,
+      annualVol: Math.round(rebalVol * 10000) / 100,
+      yearly: rebalYearly,
+    },
   };
 }

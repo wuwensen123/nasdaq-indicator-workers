@@ -79,6 +79,15 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
             </select>
           </div>
           <div class="mb-3">
+            <label class="form-label">再平衡频率</label>
+            <select class="form-select" id="rebalance">
+              <option value="none">不进行再平衡</option>
+              <option value="annual">每年</option>
+              <option value="semi-annual">每半年</option>
+              <option value="quarterly">每季度</option>
+            </select>
+          </div>
+          <div class="mb-3">
             <label class="form-label">每次定投金额（元）</label>
             <input type="number" class="form-control" id="amount" value="1000" min="1">
           </div>
@@ -279,6 +288,7 @@ async function runBacktest() {
     assets,
     amount: parseFloat(document.getElementById('amount').value) || 1000,
     frequency: document.getElementById('frequency').value,
+    rebalance: document.getElementById('rebalance').value,
     startDate: document.getElementById('startDate').value,
     endDate: document.getElementById('endDate').value,
   };
@@ -372,21 +382,50 @@ function renderResults(data) {
     </div>
   </div>`;
 
+  // 再平衡对比（如果数据存在且与原始结果不同）
+  const hasRebal = data.rebalanced && Math.abs(data.rebalanced.finalValue - data.finalValue) > 1;
+  if (hasRebal) {
+    const rb = data.rebalanced;
+    const diff = ((rb.finalValue - data.finalValue) / data.finalValue * 100).toFixed(2);
+    html += `<div class="row g-3 mb-4">
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">🔄 再平衡效果对比</div>
+          <div class="card-body">
+            <table class="table">
+              <tr><th>指标</th><th>不再平衡</th><th>再平衡后</th><th>差异</th></tr>
+              <tr><td>最终金额</td><td>¥${fmt(data.finalValue)}</td><td>¥${fmt(rb.finalValue)}</td><td style="color:${diff >= 0 ? 'var(--green)' : 'var(--red)'};">${diff >= 0 ? '+' : ''}${diff}%</td></tr>
+              <tr><td>CAGR</td><td>${data.cagr}%</td><td>${rb.cagr}%</td><td style="color:${(rb.cagr - data.cagr) >= 0 ? 'var(--green)' : 'var(--red)'};">${(rb.cagr - data.cagr) >= 0 ? '+' : ''}${(rb.cagr - data.cagr).toFixed(2)}%</td></tr>
+              <tr><td>夏普比率</td><td>${data.sharpeRatio}</td><td>${rb.sharpeRatio}</td><td style="color:${(rb.sharpeRatio - data.sharpeRatio) >= 0 ? 'var(--green)' : 'var(--red)'};">${(rb.sharpeRatio - data.sharpeRatio) >= 0 ? '+' : ''}${(rb.sharpeRatio - data.sharpeRatio).toFixed(2)}</td></tr>
+              <tr><td>最大回撤</td><td>${data.maxDrawdown}%</td><td>${rb.maxDrawdown}%</td><td style="color:${(data.maxDrawdown - rb.maxDrawdown) >= 0 ? 'var(--green)' : 'var(--red)'};">${(data.maxDrawdown - rb.maxDrawdown) >= 0 ? '-' : '+'}${Math.abs(data.maxDrawdown - rb.maxDrawdown).toFixed(2)}%</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
   // 逐年表格
+  const rebalYearly = hasRebal ? data.rebalanced.yearly : [];
   html += `<div class="card"><div class="card-header">📅 逐年收益明细</div><div class="card-body"><div class="table-responsive"><table class="table table-striped"><thead><tr>
-    <th>年份</th><th>当年投入</th><th>累计投入</th><th>年末总金额</th><th>年收益率</th>
+    <th>年份</th><th>当年投入</th><th>累计投入</th>
+    <th>不再平衡 年末金额</th><th>不再平衡 年收益</th>
+    ${hasRebal ? '<th>再平衡后 年末金额</th><th>再平衡后 年收益</th>' : ''}
   </tr></thead><tbody>`;
   const yearly = data.yearly || [];
   for (let idx = 0; idx < yearly.length; idx++) {
     const y = yearly[idx];
     const color = y.return >= 0 ? 'var(--green)' : 'var(--red)';
     const prevInv = idx > 0 ? yearly[idx-1].invested : 0;
+    const ry = hasRebal && rebalYearly[idx] ? rebalYearly[idx] : null;
+    const rColor = ry ? (ry.return >= 0 ? 'var(--green)' : 'var(--red)') : '';
     html += `<tr>
       <td>${y.year}</td>
       <td>¥${fmt(y.invested - prevInv)}</td>
       <td>¥${fmt(y.invested)}</td>
       <td>¥${fmt(y.value)}</td>
       <td style="color:${color};">${y.return >= 0 ? '+' : ''}${y.return}%</td>
+      ${hasRebal && ry ? `<td>¥${fmt(ry.value)}</td><td style="color:${rColor};">${ry.return >= 0 ? '+' : ''}${ry.return}%</td>` : ''}
     </tr>`;
   }html += `</tbody></table></div></div></div>`;
 

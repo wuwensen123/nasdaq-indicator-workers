@@ -208,7 +208,7 @@ export default {
     if (path === '/api/backtest' && request.method === 'POST') {
       try {
         const body = await request.json();
-        const { assets, amount, frequency, startDate, endDate } = body;
+        const { assets, amount, frequency, startDate, endDate, rebalance } = body;
         if (!assets || !assets.length || !amount || !startDate || !endDate) {
           return json({ success: false, error: '缺少参数' }, 400);
         }
@@ -221,7 +221,7 @@ export default {
           }
           assetData.push({ ...a, ...hist });
         }
-        const result = runBacktest({ assets: assetData, amount, frequency, startDate, endDate });
+        const result = runBacktest({ assets: assetData, amount, frequency, startDate, endDate, rebalance: rebalance || 'none' });
         return json({ success: true, ...result });
       } catch (e) {
         return json({ success: false, error: e.message }, 500);
