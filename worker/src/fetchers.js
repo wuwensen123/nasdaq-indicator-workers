@@ -245,6 +245,33 @@ export class Fetcher {
     } catch {}
     return result;
   }
+// ========== 股息率（中国 A 股） ==========
+  async getDividendYield(symbol, peRatio, stockType) {
+    // 方案1: 东方财富 push2 API（从 Worker 调用，网络更稳定）
+    try {
+      const code = symbol.replace('.SS', '').replace('.SZ', '');
+      const market = symbol.endsWith('.SS') ? '1' : '0';
+      const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${market}.${code}&fields=f186`;
+      const d = await fetchJSON(url);
+      const dy = d?.data?.f186;
+      if (dy != null && dy > 0) return { value: round(dy / 100), source: '东方财富', updated_at: now() };
+    } catch {}
+    // 方案2: 从 PE 和行业分红率计算
+    if (peRatio && peRatio > 0) {
+      let payoutRatio = 0.30; // 默认 30% 分红率
+      if (stockType.includes('银行')) payoutRatio = 0.30;
+      else if (stockType.includes('电力')) payoutRatio = 0.70;
+      else if (stockType.includes('矿业')) payoutRatio = 0.20;
+      else if (stockType.includes('红利')) payoutRatio = 0.90;
+      else if (stockType.includes('ETF') || stockType.includes('指数')) payoutRatio = 0.85;
+      const dy = (payoutRatio / peRatio) * 100;
+      return { value: round(dy), source: 'PE×分红率估算', updated_at: now() };
+    }
+    // 方案3: 红利类 ETF 无 PE 时用默认值
+    if (stockType.includes('红利') || stockType.includes('ETF')) return { value: 4.5, source: '红利ETF参考值', updated_at: now() };
+    return { value: null, source: '东方财富', updated_at: now() };
+  }
+
 // ========== 中国指数 PE（从腾讯财经获取） ==========
   async getChinaIndexPE() {
     const result = { shanghai_pe: null, csi300_pe: null };

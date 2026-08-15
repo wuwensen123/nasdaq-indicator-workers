@@ -13,20 +13,20 @@ export class Analyzer {
         weights: { rsi: 0.20, dxy: 0.25, yield_10y: 0.20, ma200: 0.15, vix: 0.10, fear_greed: 0.10 }, pe_normal: null },
       { id: 'hsi', name: '恒生指数', symbol: '^HSI', type: '香港指数', indicators: ['pe_hsi', 'rsi', 'fear_greed', 'ma200', 'vix', 'dxy'],
         weights: { pe_hsi: 0.25, rsi: 0.20, fear_greed: 0.15, ma200: 0.15, vix: 0.15, dxy: 0.10 }, pe_normal: 12 },
-      { id: 'dividend_low_vol_etf', name: '红利低波ETF(512890)', symbol: '512890.SS', type: '中国ETF', indicators: ['rsi', 'ma200', 'pe_shanghai', 'pe_csi300'],
-        weights: { rsi: 0.30, ma200: 0.25, pe_shanghai: 0.25, pe_csi300: 0.20 }, pe_normal: null },
-      { id: 'dividend_low_vol_100', name: '红利低波100(930955)', symbol: '000300.SS', type: '中国指数', indicators: ['rsi', 'ma200', 'pe_shanghai', 'pe_csi300'],
-        weights: { rsi: 0.30, ma200: 0.25, pe_shanghai: 0.25, pe_csi300: 0.20 }, pe_normal: null },
-      { id: 'abc_bank', name: '农业银行(601288)', symbol: '601288.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
-        weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
-      { id: 'ccb_bank', name: '建设银行(601939)', symbol: '601939.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
-        weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
-      { id: 'yangtze_power', name: '长江电力(600900)', symbol: '600900.SS', type: '中国电力股', indicators: ['rsi', 'ma200', 'pe_utility', 'pe_csi300'],
-        weights: { rsi: 0.30, ma200: 0.25, pe_utility: 0.25, pe_csi300: 0.20 }, pe_normal: null },
-      { id: 'cmb_bank', name: '招商银行(600036)', symbol: '600036.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300'],
-        weights: { rsi: 0.30, ma200: 0.25, pe_stock: 0.25, pe_csi300: 0.20 }, pe_normal: null },
-      { id: 'zijin_mining', name: '紫金矿业(601899)', symbol: '601899.SS', type: '中国矿业股', indicators: ['rsi', 'ma200', 'pe_mining', 'pe_csi300'],
-        weights: { rsi: 0.30, ma200: 0.25, pe_mining: 0.25, pe_csi300: 0.20 }, pe_normal: null },
+      { id: 'dividend_low_vol_etf', name: '红利低波ETF(512890)', symbol: '512890.SS', type: '中国ETF', indicators: ['rsi', 'ma200', 'pe_shanghai', 'pe_csi300', 'dividend_yield'],
+        weights: { rsi: 0.20, ma200: 0.20, pe_shanghai: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
+      { id: 'dividend_low_vol_100', name: '红利低波100(930955)', symbol: '000300.SS', type: '中国指数', indicators: ['rsi', 'ma200', 'pe_shanghai', 'pe_csi300', 'dividend_yield'],
+        weights: { rsi: 0.20, ma200: 0.20, pe_shanghai: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
+      { id: 'abc_bank', name: '农业银行(601288)', symbol: '601288.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300', 'dividend_yield'],
+        weights: { rsi: 0.20, ma200: 0.20, pe_stock: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
+      { id: 'ccb_bank', name: '建设银行(601939)', symbol: '601939.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300', 'dividend_yield'],
+        weights: { rsi: 0.20, ma200: 0.20, pe_stock: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
+      { id: 'yangtze_power', name: '长江电力(600900)', symbol: '600900.SS', type: '中国电力股', indicators: ['rsi', 'ma200', 'pe_utility', 'pe_csi300', 'dividend_yield'],
+        weights: { rsi: 0.20, ma200: 0.20, pe_utility: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
+      { id: 'cmb_bank', name: '招商银行(600036)', symbol: '600036.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300', 'dividend_yield'],
+        weights: { rsi: 0.20, ma200: 0.20, pe_stock: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
+      { id: 'zijin_mining', name: '紫金矿业(601899)', symbol: '601899.SS', type: '中国矿业股', indicators: ['rsi', 'ma200', 'pe_mining', 'pe_csi300', 'dividend_yield'],
+        weights: { rsi: 0.20, ma200: 0.20, pe_mining: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
     ];
   }
 
@@ -81,6 +81,7 @@ export class Analyzer {
       'pe_stock': () => { const v = td.pe_ratio; const s = normPE_Stock(v); return { ...s, value: v }; },
       'pe_utility': () => { const v = td.pe_ratio; const s = normPE_Utility(v); return { ...s, value: v }; },
       'pe_mining': () => { const v = td.pe_ratio; const s = normPE_Mining(v); return { ...s, value: v }; },
+      'dividend_yield': () => { const v = td.dividend_yield; const s = normDividendYield(v); return { ...s, value: v, unit: '%' }; },
     };
 
     if (globalIndicators[ind]) return { ...base, ...globalIndicators[ind]() };
@@ -120,6 +121,7 @@ export class Analyzer {
       pe_qqq: '纳斯达克100市盈率', pe_sp500: '标普500市盈率', pe_hsi: '恒生指数市盈率',
       pe_shanghai: '上证指数市盈率', pe_csi300: '沪深300市盈率',
       pe_stock: '银行股市盈率', pe_utility: '电力股市盈率', pe_mining: '矿业股市盈率',
+      dividend_yield: '股息率',
       rsi: 'RSI(14)', ma200: '200日均线偏离度',
     };
     return names[k] || k;
@@ -139,6 +141,7 @@ export class Analyzer {
       pe_stock: { name: '银行股市盈率', desc: '银行股估值水平' },
       pe_utility: { name: '电力股市盈率', desc: '电力行业估值水平' },
       pe_mining: { name: '矿业股市盈率', desc: '矿业行业估值水平' },
+      dividend_yield: { name: '股息率', desc: '分红收益率，越高越适合定投（参考华尔街红利策略）' },
       rsi: { name: 'RSI(14)相对强弱指标', desc: '技术指标，越高越超买' },
       ma200: { name: '200日均线偏离度', desc: '价格相对于200日均线的位置' },
     };
@@ -275,6 +278,19 @@ function normPE_Utility(v) {
   if (v < 20) return { score: cap(45 + (v - 16) / 4 * 25), label: '正常' };
   if (v < 25) return { score: cap(70 + (v - 20) / 5 * 15), label: '偏高' };
   return { score: cap(85 + Math.min(15, (v - 25) / 5 * 15)), label: '高估' };
+}
+
+function normDividendYield(v) {
+  // 华尔街红利投资策略：高股息率 = 低估 = 适合定投
+  // 参考 Dogs of the Dow 策略和红利因子模型
+  if (v == null) return { score: null, label: 'N/A' };
+  if (v >= 6) return { score: 5, label: '极高股息' };        // >6% 极度低估
+  if (v >= 5) return { score: 15, label: '高股息' };          // 5-6% 严重低估
+  if (v >= 4) return { score: 25, label: '较高股息' };         // 4-5% 低估
+  if (v >= 3) return { score: 40, label: '中等股息' };         // 3-4% 正常偏低
+  if (v >= 2) return { score: 55, label: '低股息' };           // 2-3% 正常
+  if (v >= 1) return { score: 70, label: '极低股息' };        // 1-2% 偏高
+  return { score: 85, label: '无分红' };                       // <1% 高估
 }
 
 function normPE_Mining(v) {
