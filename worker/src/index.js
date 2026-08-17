@@ -63,6 +63,11 @@ async function getCache(env) {
 // 写入 D1 缓存
 async function setCache(env, data, fetchedAt) {
   if (!env.nasdaq_cache) return;
+  // 不缓存空结果
+  if (!data || !data.analysis || !data.analysis.results || data.analysis.results.length === 0) {
+    console.error('Skipped cache write: empty results');
+    return;
+  }
   try {
     // 清空旧数据，保留最近1条
     await env.nasdaq_cache.prepare('DELETE FROM market_cache WHERE id NOT IN (SELECT id FROM market_cache ORDER BY id DESC LIMIT 1)').run();
