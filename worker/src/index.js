@@ -271,16 +271,32 @@ export default {
     return error('Not found', 404);
   },
 
-  // 定时任务（每天 7:30 和 13:30 自动抓取数据）
+  // 定时任务（7:30/14:30 抓取指标数据，9:30 检查QDII溢价发邮件）
   async scheduled(event, env, ctx) {
     await initDB(env);
-    console.log(`[Scheduler] 开始定时抓取数据 at ${new Date().toISOString()}`);
-    try {
-      const freshData = await fetchFreshData();
-      await setCache(env, freshData, freshData.fetched_at);
-      console.log(`[Scheduler] 数据抓取完成，耗时 ${freshData.fetch_time_seconds}s`);
-    } catch (e) {
-      console.error(`[Scheduler] 抓取失败: ${e.message}`);
+    const cron = event.cron || '';
+    const time = new Date().toISOString();
+
+    if (cron === '30 9 * * *') {
+      // 9:30 — QDII 溢价检查 + 邮件通知
+      console.log(`[Scheduler] QDII溢价检查 at ${time}`);
+      try {
+        const { checkQDIIAndNotify } = await import('./notify.js');
+        const result = await checkQDIIAndNotify(env);
+        console.log(`[Scheduler] QDII通知: ${result.message}`);
+      } catch (e) {
+        console.error(`[Scheduler] QDII检查失败: ${e.message}`);
+      }
+    } else {
+      // 7:30 / 14:30 — 指标数据抓取
+      console.log(`[Scheduler] 开始定时抓取数据 at ${time}`);
+      try {
+        const freshData = await fetchFreshData();
+        await setCache(env, freshData, freshData.fetched_at);
+        console.log(`[Scheduler] 数据抓取完成，耗时 ${freshData.fetch_time_seconds}s`);
+      } catch (e) {
+        console.error(`[Scheduler] 抓取失败: ${e.message}`);
+      }
     }
   },
 };
