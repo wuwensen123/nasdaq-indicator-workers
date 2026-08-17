@@ -6,6 +6,7 @@
 
 import { Fetcher } from './fetchers.js';
 import { Analyzer } from './analyzer.js';
+import { fetchQDII } from './qdii.js';
 import { runBacktest } from './backtest.js';
 
 const fetcher = new Fetcher();
@@ -228,6 +229,35 @@ export default {
         }
         const result = runBacktest({ assets: assetData, amount, frequency, startDate, endDate, rebalance: rebalance || 'none' });
         return json({ success: true, ...result });
+      } catch (e) {
+        return json({ success: false, error: e.message }, 500);
+      }
+    }
+
+// QDII ETF 溢价率 API
+    if (path === '/api/qdii/data' || path === '/api/qdii/refresh') {
+      const isRefresh = path === '/api/qdii/refresh';
+      try {
+        if (isRefresh) {
+          const data = await fetchQDII();
+          await setCache(env, data, data.fetched_at);
+          data.from_cache = false;
+          data.refreshed = true;
+          return json(data);
+        }
+        // 优先从缓存读取
+        try {
+          const cached = await getCache(env);
+          if (cached) {
+            cached.data.from_cache = true;
+            cached.data.cached_at = cached.fetched_at;
+            return json(cached.data);
+          }
+        } catch {}
+        // 无缓存：实时获取
+        const data = await fetchQDII();
+        ctx.waitUntil(setCache(env, data, data.fetched_at));
+        return json(data);
       } catch (e) {
         return json({ success: false, error: e.message }, 500);
       }
