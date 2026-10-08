@@ -221,6 +221,9 @@ function toggleInvestMode() {
   }
 }
 
+// 页面加载时初始化显示状态
+document.addEventListener('DOMContentLoaded', toggleInvestMode);
+
 function updateWeightTotal() {
   const el = document.getElementById('weightTotal');
   if (!el) return;
