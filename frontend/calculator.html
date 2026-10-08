@@ -72,6 +72,13 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
         <div class="card-header">⚙️ 参数设置</div>
         <div class="card-body">
           <div class="mb-3">
+            <label class="form-label">投入模式</label>
+            <select class="form-select" id="investMode" onchange="toggleInvestMode()">
+              <option value="dca">每月定投</option>
+              <option value="lump">一次性投入</option>
+            </select>
+          </div>
+          <div class="mb-3" id="freqRow">
             <label class="form-label">定投频率</label>
             <select class="form-select" id="frequency">
               <option value="monthly">每月</option>
@@ -89,7 +96,7 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
             </select>
           </div>
           <div class="mb-3">
-            <label class="form-label">每次定投金额（元）</label>
+            <label class="form-label" id="amountLabel">每次定投金额（元）</label>
             <input type="number" class="form-control" id="amount" value="1000" min="1">
           </div>
           <div class="mb-3">
@@ -97,8 +104,13 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
             <input type="date" class="form-control" id="startDate" value="2015-01-01">
           </div>
           <div class="mb-3">
-            <label class="form-label">结束日期</label>
-            <input type="date" class="form-control" id="endDate" value="2026-08-01">
+            <label class="form-label">结束日期（持有到期）</label>
+            <input type="date" class="form-control" id="endDate" value="2026-10-01">
+          </div>
+          <div class="mb-3" id="investEndRow" style="display:none;">
+            <label class="form-label">投入结束日期（留空=一直投入到期末）</label>
+            <input type="date" class="form-control" id="investEndDate" value="">
+            <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">投入阶段结束后进入"平滑持有"，不再投入不卖出，持有到期末</div>
           </div>
           <div class="mb-3">
             <label class="form-label">预设组合</label>
@@ -192,6 +204,22 @@ function loadPreset(name, btn) {
 }
 
 function addAsset() { addAssetRow('VOO', 100); }
+
+function toggleInvestMode() {
+  const mode = document.getElementById('investMode').value;
+  const freqRow = document.getElementById('freqRow');
+  const investEndRow = document.getElementById('investEndRow');
+  const amountLabel = document.getElementById('amountLabel');
+  if (mode === 'lump') {
+    freqRow.style.display = 'none';
+    investEndRow.style.display = 'none';
+    amountLabel.textContent = '投入总额（元）';
+  } else {
+    freqRow.style.display = '';
+    investEndRow.style.display = '';
+    amountLabel.textContent = '每次定投金额（元）';
+  }
+}
 
 function updateWeightTotal() {
   const el = document.getElementById('weightTotal');
@@ -290,6 +318,8 @@ async function runBacktest() {
     amount: parseFloat(document.getElementById('amount').value) || 1000,
     frequency: document.getElementById('frequency').value,
     rebalance: document.getElementById('rebalance').value,
+    investMode: document.getElementById('investMode').value,
+    investEndDate: document.getElementById('investEndDate').value || undefined,
     startDate: document.getElementById('startDate').value,
     endDate: document.getElementById('endDate').value,
   };

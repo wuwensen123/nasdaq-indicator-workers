@@ -34,24 +34,34 @@ function calcCAGR(finalValue, totalInvested, years) {
 }
 
 // 按频率生成定投日期
-function getInvestDates(frequency, startDate, endDate) {
+// investMode: 'dca'(定投,默认) | 'lump'(一次性)
+// investEndDate: 投入阶段结束日(可选), 之后进入持有期不再投入
+function getInvestDates(frequency, startDate, endDate, investMode, investEndDate) {
   const dates = [];
   const start = new Date(startDate);
-  const end = new Date(endDate);
+  // 投入阶段截止日: 若指定 investEndDate 则用它, 否则用 endDate(全程投入)
+  const investEnd = investEndDate ? new Date(investEndDate) : new Date(endDate);
   const current = new Date(start);
 
+  // 一次性投入: 只在 start 日投入一次
+  if (investMode === 'lump') {
+    dates.push(new Date(start).toISOString().slice(0, 10));
+    return dates;
+  }
+
+  // 定投模式: 按 frequency 在 [start, investEnd] 生成
   if (frequency === 'monthly') {
-    while (current <= end) {
+    while (current <= investEnd) {
       dates.push(new Date(current).toISOString().slice(0, 10));
       current.setMonth(current.getMonth() + 1);
     }
   } else if (frequency === 'weekly') {
-    while (current <= end) {
+    while (current <= investEnd) {
       dates.push(new Date(current).toISOString().slice(0, 10));
       current.setDate(current.getDate() + 7);
     }
   } else if (frequency === 'quarterly') {
-    while (current <= end) {
+    while (current <= investEnd) {
       dates.push(new Date(current).toISOString().slice(0, 10));
       current.setMonth(current.getMonth() + 3);
     }
@@ -97,15 +107,16 @@ function applyRebalance(shares, assets, findPrice, date) {
 
 // 主回测函数
 export function runBacktest(config) {
-  const { assets, amount, frequency, startDate, endDate, rebalance } = config;
+  const { assets, amount, frequency, startDate, endDate, rebalance, investMode, investEndDate } = config;
   // assets: [{ symbol, weight, prices[], dates[], dividends{} }]
-  // amount: 每次定投总金额
-  // weight: 该标的占比（小数，如 0.5）
+  // amount: 每次定投金额(定投模式) 或 一次性投入总额(lump模式)
+  // investMode: 'dca'(默认) | 'lump'
+  // investEndDate: 投入阶段结束日, 之后持有到期末(可选)
 
   if (!assets.length || !amount) return null;
 
   const totalAmount = amount;
-  const investDates = getInvestDates(frequency, startDate, endDate);
+  const investDates = getInvestDates(frequency, startDate, endDate, investMode || 'dca', investEndDate);
 
   // 为每个标的维护份额
   const shares = assets.map(() => 0);
