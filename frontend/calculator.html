@@ -263,27 +263,39 @@ function addScheme() {
     return;
   }
   const idx = list.querySelectorAll('.scheme-card').length;
+  const letter = String.fromCharCode(65 + idx);
   const div = document.createElement('div');
   div.className = 'scheme-card card mb-3';
   div.innerHTML = `
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-      <span>方案 ${String.fromCharCode(65 + idx)}</span>
+      <span>方案 ${letter}</span>
       <button class="btn-remove" onclick="this.parentElement.parentElement.remove()">×</button>
     </div>
-    <div class="card-body">
+    <div class="card-body" style="font-size:0.9rem;">
       <div class="mb-2">
-        <input type="text" class="form-control" placeholder="方案名称（如：一次性10万）" value="方案${String.fromCharCode(65 + idx)}">
+        <input type="text" class="form-control scheme-name" placeholder="方案名称（如：一次性10万）" value="">
       </div>
       <div class="mb-2">
+        <label class="form-label" style="font-size:0.8rem;">投入模式</label>
         <select class="form-select scheme-investMode">
           <option value="dca">每月定投</option>
           <option value="lump">一次性投入</option>
         </select>
       </div>
-      <div class="mb-2">
-        <input type="number" class="form-control scheme-amount" value="1000" min="1" placeholder="金额">
+      <div class="mb-2 scheme-freqRow">
+        <label class="form-label" style="font-size:0.8rem;">定投频率</label>
+        <select class="form-select scheme-frequency">
+          <option value="monthly">每月</option>
+          <option value="weekly">每周</option>
+          <option value="quarterly">每季度</option>
+        </select>
       </div>
       <div class="mb-2">
+        <label class="form-label scheme-amountLabel" style="font-size:0.8rem;">每次定投金额（元）</label>
+        <input type="number" class="form-control scheme-amount" value="1000" min="1">
+      </div>
+      <div class="mb-2">
+        <label class="form-label" style="font-size:0.8rem;">再平衡频率</label>
         <select class="form-select scheme-rebalance">
           <option value="none">不进行再平衡</option>
           <option value="annual">每年</option>
@@ -291,17 +303,40 @@ function addScheme() {
           <option value="quarterly">每季度</option>
         </select>
       </div>
+      <div class="mb-2 scheme-investEndRow">
+        <label class="form-label" style="font-size:0.8rem;">投入结束日期（留空=投入到期末）</label>
+        <input type="date" class="form-control scheme-investEnd" value="">
+      </div>
       <div class="mb-2">
-        <input type="date" class="form-control scheme-investEnd" placeholder="投入结束日期">
+        <label class="form-label" style="font-size:0.8rem;">开始日期</label>
+        <input type="date" class="form-control scheme-start" value="2015-01-01">
+      </div>
+      <div class="mb-2">
+        <label class="form-label" style="font-size:0.8rem;">结束日期（持有到期）</label>
+        <input type="date" class="form-control scheme-end" value="2026-10-01">
       </div>
     </div>
   `;
   list.appendChild(div);
   div.querySelector('.scheme-investMode').addEventListener('change', function() {
-    // 一次性模式隐藏投入结束
-    const endInput = this.closest('.scheme-card').querySelector('.scheme-investEnd');
-    endInput.style.display = this.value === 'lump' ? 'none' : '';
+    updateSchemeFields(this.closest('.scheme-card'));
   });
+}
+
+function updateSchemeFields(card) {
+  const mode = card.querySelector('.scheme-investMode').value;
+  const freqRow = card.querySelector('.scheme-freqRow');
+  const investEndRow = card.querySelector('.scheme-investEndRow');
+  const amountLabel = card.querySelector('.scheme-amountLabel');
+  if (mode === 'lump') {
+    if (freqRow) freqRow.style.display = 'none';
+    if (investEndRow) investEndRow.style.display = 'none';
+    if (amountLabel) amountLabel.textContent = '投入总额（元）';
+  } else {
+    if (freqRow) freqRow.style.display = '';
+    if (investEndRow) investEndRow.style.display = '';
+    if (amountLabel) amountLabel.textContent = '每次定投金额（元）';
+  }
 }
 
 function updateWeightTotal() {
@@ -413,30 +448,33 @@ async function runBacktest() {
   const end = document.getElementById('endDate').value;
 
   if (compareMode === 'compare') {
-    // 收集所有方案
+    // 收集所有方案（完整参数）
     const schemes = [];
     document.querySelectorAll('.scheme-card').forEach(card => {
-      const labelInput = card.querySelector('.scheme-card input') || card.querySelector('input[placeholder*="方案名称"]');
+      const nameInput = card.querySelector('.scheme-name');
       const mode = card.querySelector('.scheme-investMode').value;
+      const frequency = card.querySelector('.scheme-frequency').value;
       const amount = parseFloat(card.querySelector('.scheme-amount').value) || 0;
       const rebalance = card.querySelector('.scheme-rebalance').value;
       const investEnd = card.querySelector('.scheme-investEnd').value || undefined;
-      if (amount > 0) {
+      const sdate = card.querySelector('.scheme-start').value;
+      const edate = card.querySelector('.scheme-end').value;
+      if (amount > 0 && sdate && edate) {
         schemes.push({
-          label: (labelInput && labelInput.value) || '方案',
+          label: (nameInput && nameInput.value.trim()) || '方案',
           assets: assets.map(a => ({ ...a })),
           amount,
-          frequency: 'monthly',
-          rebalance,
-          investMode: mode,
+          frequency: frequency || 'monthly',
+          rebalance: rebalance || 'none',
+          investMode: mode || 'dca',
           investEndDate: investEnd,
-          startDate: start,
-          endDate: end,
+          startDate: sdate,
+          endDate: edate,
         });
       }
     });
     if (schemes.length < 2) {
-      alert('对比模式至少需要 2 个有效方案');
+      alert('对比模式至少需要 2 个有效方案（含金额、开始/结束日期）');
       spinner.classList.remove('active'); btn.disabled = false; return;
     }
   }
