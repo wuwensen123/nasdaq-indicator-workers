@@ -72,6 +72,16 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
         <div class="card-header">⚙️ 参数设置</div>
         <div class="card-body">
           <div class="mb-3">
+            <label class="form-label">回测模式</label>
+            <select class="form-select" id="compareMode" onchange="toggleCompareMode()">
+              <option value="single">单方案回测</option>
+              <option value="compare">多方案对比</option>
+            </select>
+          </div>
+
+          <!-- 单方案模式 -->
+          <div id="singlePanel">
+          <div class="mb-3">
             <label class="form-label">投入模式</label>
             <select class="form-select" id="investMode" onchange="toggleInvestMode()">
               <option value="dca">每月定投</option>
@@ -111,6 +121,13 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
             <label class="form-label">投入结束日期（留空=一直投入到期末）</label>
             <input type="date" class="form-control" id="investEndDate" value="">
             <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">投入阶段结束后进入"平滑持有"，不再投入不卖出，持有到期末</div>
+          </div>
+          </div>
+
+          <!-- 多方案对比模式 -->
+          <div id="comparePanel" style="display:none;">
+            <div id="schemeList"></div>
+            <button class="btn btn-outline-secondary btn-sm mt-2" onclick="addScheme()">+ 添加方案（最多3个）</button>
           </div>
           <div class="mb-3">
             <label class="form-label">预设组合</label>
@@ -222,7 +239,70 @@ function toggleInvestMode() {
 }
 
 // 页面加载时初始化显示状态
-document.addEventListener('DOMContentLoaded', toggleInvestMode);
+document.addEventListener('DOMContentLoaded', () => { toggleInvestMode(); addScheme(); });
+
+function toggleCompareMode() {
+  const mode = document.getElementById('compareMode').value;
+  const single = document.getElementById('singlePanel');
+  const compare = document.getElementById('comparePanel');
+  if (mode === 'compare') {
+    single.style.display = 'none';
+    compare.style.display = '';
+    if (!document.querySelectorAll('.scheme-card').length) addScheme();
+  } else {
+    single.style.display = '';
+    compare.style.display = 'none';
+  }
+}
+
+// 添加对比方案卡片
+function addScheme() {
+  const list = document.getElementById('schemeList');
+  if (list.querySelectorAll('.scheme-card').length >= 3) {
+    alert('最多 3 个方案');
+    return;
+  }
+  const idx = list.querySelectorAll('.scheme-card').length;
+  const div = document.createElement('div');
+  div.className = 'scheme-card card mb-3';
+  div.innerHTML = `
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>方案 ${String.fromCharCode(65 + idx)}</span>
+      <button class="btn-remove" onclick="this.parentElement.parentElement.remove()">×</button>
+    </div>
+    <div class="card-body">
+      <div class="mb-2">
+        <input type="text" class="form-control" placeholder="方案名称（如：一次性10万）" value="方案${String.fromCharCode(65 + idx)}">
+      </div>
+      <div class="mb-2">
+        <select class="form-select scheme-investMode">
+          <option value="dca">每月定投</option>
+          <option value="lump">一次性投入</option>
+        </select>
+      </div>
+      <div class="mb-2">
+        <input type="number" class="form-control scheme-amount" value="1000" min="1" placeholder="金额">
+      </div>
+      <div class="mb-2">
+        <select class="form-select scheme-rebalance">
+          <option value="none">不进行再平衡</option>
+          <option value="annual">每年</option>
+          <option value="semi-annual">每半年</option>
+          <option value="quarterly">每季度</option>
+        </select>
+      </div>
+      <div class="mb-2">
+        <input type="date" class="form-control scheme-investEnd" placeholder="投入结束日期">
+      </div>
+    </div>
+  `;
+  list.appendChild(div);
+  div.querySelector('.scheme-investMode').addEventListener('change', function() {
+    // 一次性模式隐藏投入结束
+    const endInput = this.closest('.scheme-card').querySelector('.scheme-investEnd');
+    endInput.style.display = this.value === 'lump' ? 'none' : '';
+  });
+}
 
 function updateWeightTotal() {
   const el = document.getElementById('weightTotal');
@@ -327,13 +407,51 @@ async function runBacktest() {
     endDate: document.getElementById('endDate').value,
   };
 
+  const compareMode = document.getElementById('compareMode').value;
+  const endpoint = compareMode === 'compare' ? '/api/backtest/compare' : '/api/backtest';
+  const start = document.getElementById('startDate').value;
+  const end = document.getElementById('endDate').value;
+
+  if (compareMode === 'compare') {
+    // 收集所有方案
+    const schemes = [];
+    document.querySelectorAll('.scheme-card').forEach(card => {
+      const labelInput = card.querySelector('.scheme-card input') || card.querySelector('input[placeholder*="方案名称"]');
+      const mode = card.querySelector('.scheme-investMode').value;
+      const amount = parseFloat(card.querySelector('.scheme-amount').value) || 0;
+      const rebalance = card.querySelector('.scheme-rebalance').value;
+      const investEnd = card.querySelector('.scheme-investEnd').value || undefined;
+      if (amount > 0) {
+        schemes.push({
+          label: (labelInput && labelInput.value) || '方案',
+          assets: assets.map(a => ({ ...a })),
+          amount,
+          frequency: 'monthly',
+          rebalance,
+          investMode: mode,
+          investEndDate: investEnd,
+          startDate: start,
+          endDate: end,
+        });
+      }
+    });
+    if (schemes.length < 2) {
+      alert('对比模式至少需要 2 个有效方案');
+      spinner.classList.remove('active'); btn.disabled = false; return;
+    }
+  }
+
   try {
-    const res = await fetch(API_BASE + '/api/backtest', {
+    const payload = compareMode === 'compare' ? { schemes } : body;
+    const res = await fetch(API_BASE + endpoint, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
-    if (data.success) renderResults(data);
+    if (data.success) {
+      if (compareMode === 'compare') renderCompareResults(data.schemes);
+      else renderResults(data);
+    }
     else alert('错误: ' + (data.error || '未知错误'));
   } catch (e) {
     alert('网络错误: ' + e.message);
@@ -341,6 +459,63 @@ async function runBacktest() {
     spinner.classList.remove('active');
     btn.disabled = false;
   }
+}
+
+function renderCompareResults(schemes) {
+  const area = document.getElementById('resultArea');
+  // 对比汇总表
+  let html = `
+  <div class="card mb-3">
+    <div class="card-header">🔀 多方案对比</div>
+    <div class="card-body">
+      <div class="table-responsive"><table class="table">
+        <thead><tr>
+          <th>指标</th>
+          ${schemes.map(s => `<th>${s.label}</th>`).join('')}
+        </tr></thead>
+        <tbody>
+          <tr><td>总投入</td>${schemes.map(s => `<td>¥${fmt(s.totalInvested)}</td>`).join('')}</tr>
+          <tr><td>最终金额</td>${schemes.map(s => `<td style="color:var(--green);">¥${fmt(s.finalValue)}</td>`).join('')}</tr>
+          <tr><td>本金倍数</td>${schemes.map(s => `<td>${s.multiple}x</td>`).join('')}</tr>
+          <tr><td>CAGR</td>${schemes.map(s => `<td>${s.cagr}%</td>`).join('')}</tr>
+          <tr><td>XIRR</td>${schemes.map(s => `<td>${s.xirr}%</td>`).join('')}</tr>
+          <tr><td>夏普比率</td>${schemes.map(s => `<td>${s.sharpeRatio}</td>`).join('')}</tr>
+          <tr><td>最大回撤</td>${schemes.map(s => `<td style="color:var(--red);">${s.maxDrawdown}%</td>`).join('')}</tr>
+          <tr><td>年化波动率</td>${schemes.map(s => `<td>${s.annualVol}%</td>`).join('')}</tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>`;
+
+  // 累计金额曲线（每方案一条线）
+  html += `<div class="card"><div class="card-header">📈 累计金额曲线对比</div><div class="card-body"><canvas id="compareChart" height="300"></canvas></div></div>`;
+
+  area.innerHTML = html;
+
+  // 绘制对比折线图
+  const ctx = document.getElementById('compareChart');
+  const colors = ['#0969da', '#2da44e', '#bf8700'];
+  const datasets = schemes.map((s, i) => ({
+    label: s.label,
+    data: (s.yearly || []).map(y => y.value),
+    borderColor: colors[i % 3],
+    tension: 0.1,
+    pointRadius: 0,
+    fill: false,
+  }));
+  const labels = schemes[0] && schemes[0].yearly ? schemes[0].yearly.map(y => y.year) : [];
+  new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#1a1a2e' } } },
+      scales: {
+        x: { ticks: { color: '#586069' }, grid: { color: 'rgba(0,0,0,0.05)' } },
+        y: { ticks: { color: '#586069' }, grid: { color: 'rgba(0,0,0,0.05)' } },
+      },
+    },
+  });
 }
 
 function renderResults(data) {

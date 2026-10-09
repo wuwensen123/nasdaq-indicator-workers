@@ -7,7 +7,7 @@
 import { Fetcher } from './fetchers.js';
 import { Analyzer } from './analyzer.js';
 import { fetchQDII } from './qdii.js';
-import { runBacktest } from './backtest.js';
+import { runBacktest, compareBacktests } from './backtest.js';
 
 const fetcher = new Fetcher();
 const analyzer = new Analyzer();
@@ -234,6 +234,38 @@ export default {
         }
         const result = runBacktest({ assets: assetData, amount, frequency, startDate, endDate, rebalance: rebalance || 'none', investMode: investMode || 'dca', investEndDate });
         return json({ success: true, ...result });
+      } catch (e) {
+        return json({ success: false, error: e.message }, 500);
+      }
+    }
+
+    // 多方案对比回测 API
+    if (path === '/api/backtest/compare' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const { schemes } = body;
+        if (!schemes || !schemes.length || schemes.length > 3) {
+          return json({ success: false, error: '需要 2-3 个方案' }, 400);
+        }
+        // 为每个方案获取资产历史数据并回测
+        const results = [];
+        for (const s of schemes) {
+          const { assets, amount, frequency, startDate, endDate, rebalance, investMode, investEndDate, label } = s;
+          if (!assets || !assets.length || !amount || !startDate || !endDate) {
+            return json({ success: false, error: `方案 "${label || '未命名'}" 缺少参数` }, 400);
+          }
+          const assetData = [];
+          for (const a of assets) {
+            const hist = await fetcher.getHistoricalPrices(a.symbol, startDate, endDate);
+            if (!hist.dates || !hist.dates.length) {
+              return json({ success: false, error: `无法获取 ${a.symbol} 的历史数据` }, 400);
+            }
+            assetData.push({ ...a, ...hist });
+          }
+          const result = runBacktest({ assets: assetData, amount, frequency, startDate, endDate, rebalance: rebalance || 'none', investMode: investMode || 'dca', investEndDate });
+          results.push({ label: label || '未命名', ...result });
+        }
+        return json({ success: true, schemes: results });
       } catch (e) {
         return json({ success: false, error: e.message }, 500);
       }

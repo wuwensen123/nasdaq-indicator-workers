@@ -441,3 +441,13 @@ export function runBacktest(config) {
     },
   };
 }
+
+// 批量回测（多方案对比）
+// schemes: [{ label, assets, amount, frequency, startDate, endDate, rebalance, investMode, investEndDate }]
+export function compareBacktests(schemes) {
+  return schemes.map(s => {
+    const { label, ...config } = s;
+    const result = runBacktest(config);
+    return { label, ...result };
+  });
+}
