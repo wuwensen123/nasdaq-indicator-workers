@@ -40,7 +40,11 @@ function getInvestDates(frequency, startDate, endDate, investMode, investEndDate
   const dates = [];
   const start = new Date(startDate);
   // 投入阶段截止日: 若指定 investEndDate 则用它, 否则用 endDate(全程投入)
-  const investEnd = investEndDate ? new Date(investEndDate) : new Date(endDate);
+  // 若 investEndDate 早于 startDate 或非法, 视为无效 → 用 endDate
+  let investEnd = new Date(investEndDate);
+  if (!investEndDate || isNaN(investEnd.getTime()) || investEnd < start) {
+    investEnd = new Date(endDate);
+  }
   const current = new Date(start);
 
   // 一次性投入: 只在 start 日投入一次

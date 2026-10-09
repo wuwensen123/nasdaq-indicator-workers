@@ -446,10 +446,11 @@ async function runBacktest() {
   const endpoint = compareMode === 'compare' ? '/api/backtest/compare' : '/api/backtest';
   const start = document.getElementById('startDate').value;
   const end = document.getElementById('endDate').value;
+  let schemes = [];
 
   if (compareMode === 'compare') {
     // 收集所有方案（完整参数）
-    const schemes = [];
+    schemes = [];
     document.querySelectorAll('.scheme-card').forEach(card => {
       const nameInput = card.querySelector('.scheme-name');
       const mode = card.querySelector('.scheme-investMode').value;
