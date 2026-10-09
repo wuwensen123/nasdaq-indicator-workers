@@ -274,10 +274,11 @@ export function runBacktest(config) {
   }
 
   // 计算最大回撤、夏普比率等指标
-  // 跟踪每个投资日期的组合市值
+  // 跟踪投资期+持有期的组合市值（按月采样，确保回撤有意义）
   const portfolioValues = [];
   const portfolioDates = [];
   const tempShares = assets.map(() => 0);
+  // 定投日逐笔买入
   for (const date of investDates) {
     for (let i = 0; i < assets.length; i++) {
       const investAmt = totalAmount * assets[i].weight;
@@ -291,6 +292,28 @@ export function runBacktest(config) {
     }
     portfolioValues.push(value);
     portfolioDates.push(date);
+  }
+  // 持有期补充采样点（从投资期结束到期末，每月末取样一次，让回撤有数据）
+  if (portfolioDates.length) {
+    const lastInvestDate = portfolioDates[portfolioDates.length - 1];
+    // 从投资期结束后第一个月起，到期末，逐月采样
+    const sampleStart = new Date(lastInvestDate);
+    sampleStart.setMonth(sampleStart.getMonth() + 1);
+    let cur = new Date(sampleStart);
+    const endDt = new Date(endDateStr);
+    while (cur <= endDt) {
+      const d = new Date(cur).toISOString().slice(0, 10);
+      let value = 0;
+      for (let i = 0; i < assets.length; i++) {
+        const price = findPrice(i, d) || 0;
+        value += tempShares[i] * price;
+      }
+      if (value > 0) {
+        portfolioValues.push(value);
+        portfolioDates.push(d);
+      }
+      cur.setMonth(cur.getMonth() + 1);
+    }
   }
 
   // 最大回撤
