@@ -76,6 +76,7 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
             <select class="form-select" id="compareMode" onchange="toggleCompareMode()">
               <option value="single">单方案回测</option>
               <option value="compare">多方案对比</option>
+              <option value="timing">📊 定投时机分布</option>
             </select>
           </div>
 
@@ -142,6 +143,30 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
           <div id="comparePanel" style="display:none;">
             <div id="schemeList"></div>
             <button class="btn btn-outline-secondary btn-sm mt-2" onclick="addScheme()">+ 添加方案（最多3个）</button>
+          </div>
+
+          <!-- 定投时机分布模式 -->
+          <div id="timingPanel" style="display:none;">
+            <div class="mb-2">
+              <label class="form-label" style="font-size:0.85rem;">持有年限</label>
+              <input type="number" class="form-control" id="holdYears" value="10" min="1" max="30">
+            </div>
+            <div class="mb-2">
+              <label class="form-label" style="font-size:0.85rem;">错开起始日步长</label>
+              <select class="form-select" id="timingStep">
+                <option value="yearly">每年 1 月 1 日</option>
+                <option value="monthly">每月 1 日</option>
+              </select>
+            </div>
+            <div class="mb-2">
+              <label class="form-label" style="font-size:0.85rem;">结束日期（统一固定）</label>
+              <input type="date" class="form-control" id="timingEndDate" value="2026-10-01">
+            </div>
+            <div class="mb-2">
+              <label class="form-label" style="font-size:0.85rem;">每次定投金额</label>
+              <input type="number" class="form-control" id="timingAmount" value="1000" min="1">
+            </div>
+            <div style="font-size:0.75rem;color:var(--text-secondary);">自动从最早可用年份起，按步长错开起始日各定投 N 年，统计年化收益分布。</div>
           </div>
           <div class="mb-3">
             <label class="form-label">预设组合</label>
@@ -272,13 +297,20 @@ function toggleCompareMode() {
   const mode = document.getElementById('compareMode').value;
   const single = document.getElementById('singlePanel');
   const compare = document.getElementById('comparePanel');
+  const timing = document.getElementById('timingPanel');
   if (mode === 'compare') {
     single.style.display = 'none';
     compare.style.display = '';
+    timing.style.display = 'none';
     if (!document.querySelectorAll('.scheme-card').length) addScheme();
+  } else if (mode === 'timing') {
+    single.style.display = 'none';
+    compare.style.display = 'none';
+    timing.style.display = '';
   } else {
     single.style.display = '';
     compare.style.display = 'none';
+    timing.style.display = 'none';
   }
 }
 
@@ -509,14 +541,29 @@ async function runBacktest() {
   }
 
   try {
-    const payload = compareMode === 'compare' ? { schemes } : body;
+    let payload;
+    if (compareMode === 'timing') {
+      payload = {
+        assets,
+        amount: parseFloat(document.getElementById('timingAmount').value) || 1000,
+        frequency: document.getElementById('frequency').value,
+        holdYears: parseFloat(document.getElementById('holdYears').value) || 10,
+        step: document.getElementById('timingStep').value,
+        endDate: document.getElementById('timingEndDate').value,
+        rebalance: document.getElementById('rebalance').value,
+        fees: collectFees(),
+      };
+    } else {
+      payload = compareMode === 'compare' ? { schemes } : body;
+    }
     const res = await fetch(API_BASE + endpoint, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (data.success) {
-      if (compareMode === 'compare') renderCompareResults(data.schemes);
+      if (compareMode === 'timing') renderTimingResults(data);
+      else if (compareMode === 'compare') renderCompareResults(data.schemes);
       else renderResults(data);
     }
     else alert('错误: ' + (data.error || '未知错误'));
@@ -526,6 +573,66 @@ async function runBacktest() {
     spinner.classList.remove('active');
     btn.disabled = false;
   }
+}
+
+function renderTimingResults(data) {
+  const area = document.getElementById('resultArea');
+  let html = `
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="result-card">
+        <div class="label">回测次数</div>
+        <div class="value" style="color:var(--blue);">${data.count}</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="result-card">
+        <div class="label">最好起始 CAGR</div>
+        <div class="value" style="color:var(--green);">${data.best.cagr}%</div>
+        <div class="label">${data.best.startDate} 启动</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="result-card">
+        <div class="label">最差起始 CAGR</div>
+        <div class="value" style="color:var(--red);">${data.worst.cagr}%</div>
+        <div class="label">${data.worst.startDate} 启动</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="result-card">
+        <div class="label">中位数 CAGR</div>
+        <div class="value" style="color:var(--yellow);">${data.median}%</div>
+        <div class="label">平均 ${data.avgCagr}%</div>
+      </div>
+    </div>
+  </div>
+  <div class="card"><div class="card-header">📈 不同起始日的年化收益分布</div><div class="card-body"><canvas id="timingChart" height="300"></canvas></div></div>`;
+  area.innerHTML = html;
+
+  const ctx = document.getElementById('timingChart');
+  const labels = data.results.map(r => r.startDate.slice(0, 4));
+  const cagrs = data.results.map(r => r.cagr);
+  const colors = cagrs.map(v => v >= data.median ? '#2da44e' : '#cf222e');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: '年化收益率 %',
+        data: cagrs,
+        backgroundColor: colors,
+      }],
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#586069' }, grid: { color: 'rgba(0,0,0,0.05)' } },
+        y: { ticks: { color: '#586069' }, grid: { color: 'rgba(0,0,0,0.05)' } },
+      },
+    },
+  });
 }
 
 function renderCompareResults(schemes) {

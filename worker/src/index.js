@@ -7,7 +7,7 @@
 import { Fetcher } from './fetchers.js';
 import { Analyzer } from './analyzer.js';
 import { fetchQDII } from './qdii.js';
-import { runBacktest, compareBacktests } from './backtest.js';
+import { runBacktest, compareBacktests, rollingStartBacktest } from './backtest.js';
 
 const fetcher = new Fetcher();
 const analyzer = new Analyzer();
@@ -266,6 +266,33 @@ export default {
           results.push({ label: label || '未命名', ...result });
         }
         return json({ success: true, schemes: results });
+      } catch (e) {
+        return json({ success: false, error: e.message }, 500);
+      }
+    }
+
+    // 定投时机分布 API
+    if (path === '/api/backtest/timing' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const { assets, amount, frequency, holdYears, step, endDate, rebalance, investEndDate, fees } = body;
+        if (!assets || !assets.length || !amount || !holdYears || !endDate) {
+          return json({ success: false, error: '缺少参数' }, 400);
+        }
+        const assetData = [];
+        // 需要覆盖足够长的历史：从 endDate 往前推 (holdYears + 30) 年获取数据
+        const histStart = new Date(endDate);
+        histStart.setFullYear(histStart.getFullYear() - holdYears - 30);
+        const histStartStr = histStart.toISOString().slice(0, 10);
+        for (const a of assets) {
+          const hist = await fetcher.getHistoricalPrices(a.symbol, histStartStr, endDate);
+          if (!hist.dates || !hist.dates.length) {
+            return json({ success: false, error: `无法获取 ${a.symbol} 的历史数据` }, 400);
+          }
+          assetData.push({ ...a, ...hist });
+        }
+        const result = rollingStartBacktest({ assets: assetData, amount, frequency, holdYears, step: step || 'yearly', endDate, rebalance, investEndDate, fees });
+        return json(result);
       } catch (e) {
         return json({ success: false, error: e.message }, 500);
       }

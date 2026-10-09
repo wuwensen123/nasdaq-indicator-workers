@@ -523,3 +523,89 @@ export function compareBacktests(schemes) {
     return { label, ...result };
   });
 }
+
+// 定投时机分布（错开起始日滚动回测）
+// config: { assets, amount, frequency, holdYears, step, endDate, rebalance, investEndDate, fees }
+// step: 'yearly'(每年1月1日) | 'monthly'(每月1日)
+export function rollingStartBacktest(config) {
+  const { assets, amount, frequency, holdYears, step, endDate, rebalance, investEndDate, fees } = config;
+  const results = [];
+  const endDt = new Date(endDate);
+
+  // 起始日范围：最早从数据可用年份开始，到 endDate - holdYears
+  // 简化：从 endDate 往前推 30 年作为最早可选起始
+  const startWindow = 30;
+  const latestStart = new Date(endDt);
+  latestStart.setFullYear(latestStart.getFullYear() - holdYears);
+  const earliestStart = new Date(endDt);
+  earliestStart.setFullYear(earliestStart.getFullYear() - holdYears - startWindow);
+
+  // 生成所有候选起始日
+  const candidates = [];
+  if (step === 'monthly') {
+    let cur = new Date(earliestStart.getFullYear(), 0, 1);
+    while (cur <= latestStart) {
+      candidates.push(new Date(cur).toISOString().slice(0, 10));
+      cur.setMonth(cur.getMonth() + 1);
+    }
+  } else {
+    for (let y = earliestStart.getFullYear(); y <= latestStart.getFullYear(); y++) {
+      candidates.push(`${y}-01-01`);
+    }
+  }
+
+  for (const startDate of candidates) {
+    const holdEnd = new Date(startDate);
+    holdEnd.setFullYear(holdEnd.getFullYear() + holdYears);
+    const holdEndStr = holdEnd.toISOString().slice(0, 10);
+    // 持有结束不能超过 endDate
+    if (holdEndStr > endDate) continue;
+    try {
+      const result = runBacktest({
+        assets,
+        amount, frequency,
+        startDate, endDate: holdEndStr,
+        rebalance: rebalance || 'none',
+        investMode: 'dca',
+        investEndDate,
+        fees,
+      });
+      results.push({
+        startDate,
+        endDate: holdEndStr,
+        totalInvested: result.totalInvested,
+        finalValue: result.finalValue,
+        cagr: result.cagr,
+        multiple: result.multiple,
+        xirr: result.xirr,
+      });
+    } catch (e) {
+      // 跳过无法回测的起始日
+    }
+  }
+
+  if (!results.length) return { success: false, error: '无可回测的起始日，请检查持有年限' };
+
+  // 统计分布
+  const cagrs = results.map(r => r.cagr).filter(v => v != null);
+  cagrs.sort((a, b) => a - b);
+  const sorted = results.slice().sort((a, b) => a.cagr - b.cagr);
+
+  const q = (arr, pct) => {
+    if (!arr.length) return null;
+    const idx = Math.min(arr.length - 1, Math.floor(arr.length * pct));
+    return arr[idx];
+  };
+
+  return {
+    success: true,
+    count: results.length,
+    best: sorted[sorted.length - 1] || null,
+    worst: sorted[0] || null,
+    median: q(cagrs, 0.5),
+    p25: q(cagrs, 0.25),
+    p75: q(cagrs, 0.75),
+    avgCagr: cagrs.length ? Math.round(cagrs.reduce((s, v) => s + v, 0) / cagrs.length * 100) / 100 : null,
+    results,
+  };
+}
