@@ -109,13 +109,53 @@ function applyRebalance(shares, assets, findPrice, date) {
   }
 }
 
+// 按市场构建费率方案
+function buildFeePlan(assets, fees) {
+  const enabled = !!(fees && fees.enabled);
+  const customRate = fees && fees.customCommission ? parseFloat(fees.customCommission) / 100 : null;
+  const minCommission = fees && fees.minCommission ? parseFloat(fees.minCommission) : null;
+
+  // 每个资产按其市场生成费率
+  return assets.map(a => {
+    const market = a.market || 'A股基金';
+    let buyRate = 0.00025, sellRate = 0.00025, sellStamp = 0, minFee = 5;
+    if (market === '美股') { buyRate = 0.0003; sellRate = 0.0003; minFee = 1; }
+    else if (market === '港股') { buyRate = 0.00025; sellRate = 0.00025; minFee = 5; }
+    // 自定义佣金覆盖买入/卖出
+    if (customRate != null) { buyRate = customRate; sellRate = customRate; }
+    return {
+      enabled,
+      buyRate, sellRate, sellStamp, minFee,
+    };
+  });
+}
+
+// 计算买入到账份额（含手续费）
+function investShares(amount, price, feePlan) {
+  if (!price || price <= 0) return 0;
+  if (!feePlan.enabled) return amount / price;
+  const fee = amount * feePlan.buyRate;
+  const actualFee = Math.max(fee, feePlan.minFee || 0);
+  return (amount - actualFee) / price;
+}
+
+// 计算卖出净额（含手续费）
+function exitValue(gross, feePlan) {
+  if (!feePlan.enabled) return gross;
+  let net = gross;
+  const sellFee = net * feePlan.sellRate;
+  net -= Math.max(sellFee, feePlan.minFee || 0);
+  net -= net * feePlan.sellStamp;
+  return net;
+}
+
 // 主回测函数
 export function runBacktest(config) {
-  const { assets, amount, frequency, startDate, endDate, rebalance, investMode, investEndDate } = config;
-  // assets: [{ symbol, weight, prices[], dates[], dividends{} }]
-  // amount: 每次定投金额(定投模式) 或 一次性投入总额(lump模式)
-  // investMode: 'dca'(默认) | 'lump'
-  // investEndDate: 投入阶段结束日, 之后持有到期末(可选)
+  const { assets, amount, frequency, startDate, endDate, rebalance, investMode, investEndDate, fees } = config;
+  // assets: [{ symbol, weight, prices[], dates[], dividends{}, market }]
+  // fees: { enabled, customCommission, minCommission } 可选
+  // 按市场取默认费率
+  const feePlan = buildFeePlan(assets, fees);
 
   if (!assets.length || !amount) return null;
 
@@ -166,7 +206,7 @@ export function runBacktest(config) {
       const investAmt = totalAmount * assets[i].weight;
       const price = findPrice(i, date);
       if (price && price > 0) {
-        shares[i] += investAmt / price;
+        shares[i] += investShares(investAmt, price, feePlan[i]);
         cashflows.push(-investAmt);
         cashflowDates.push(date);
       }
@@ -195,12 +235,15 @@ export function runBacktest(config) {
   // 计算总投入
   const totalInvested = cashflows.reduce((s, v) => s + Math.abs(v), 0);
 
-  // 计算期末价值
+  // 计算期末价值（含卖出费）
   let finalValue = 0;
+  let grossValue = 0;
   for (let i = 0; i < assets.length; i++) {
     // 找最后一个交易日价格
     const lastPrice = findPrice(i, endDateStr) || 0;
-    finalValue += shares[i] * lastPrice;
+    const val = shares[i] * lastPrice;
+    grossValue += val;
+    finalValue += exitValue(val, feePlan[i]);
   }
 
   // 加入期末现金流（用于 XIRR）
@@ -238,7 +281,7 @@ export function runBacktest(config) {
       for (let i = 0; i < assets.length; i++) {
         const investAmt = totalAmount * assets[i].weight;
         const price = findPrice(i, date);
-        if (price && price > 0) cumShares[i] += investAmt / price;
+        if (price && price > 0) cumShares[i] += investShares(investAmt, price, feePlan[i]);
       }
     }
 
@@ -287,7 +330,7 @@ export function runBacktest(config) {
     for (let i = 0; i < assets.length; i++) {
       const investAmt = totalAmount * assets[i].weight;
       const price = findPrice(i, date);
-      if (price && price > 0) tempShares[i] += investAmt / price;
+      if (price && price > 0) tempShares[i] += investShares(investAmt, price, feePlan[i]);
     }
     let value = 0;
     for (let i = 0; i < assets.length; i++) {
@@ -368,7 +411,7 @@ export function runBacktest(config) {
       for (let i = 0; i < assets.length; i++) {
         const investAmt = totalAmount * assets[i].weight;
         const price = findPrice(i, date);
-        if (price && price > 0) rebalCumShares[i] += investAmt / price;
+        if (price && price > 0) rebalCumShares[i] += investShares(investAmt, price, feePlan[i]);
       }
     }
     for (let i = 0; i < assets.length; i++) {
@@ -427,7 +470,7 @@ export function runBacktest(config) {
     for (let i = 0; i < assets.length; i++) {
       const investAmt = totalAmount * assets[i].weight;
       const price = findPrice(i, date);
-      if (price && price > 0) rebalTempShares[i] += investAmt / price;
+      if (price && price > 0) rebalTempShares[i] += investShares(investAmt, price, feePlan[i]);
     }
     if (rebalanceDates.includes(date)) {
       applyRebalance(rebalTempShares, assets, findPrice, date);
@@ -446,6 +489,8 @@ export function runBacktest(config) {
   return {
     totalInvested: Math.round(totalInvested * 100) / 100,
     finalValue: Math.round(finalValue * 100) / 100,
+    grossValue: Math.round(grossValue * 100) / 100,
+    totalFees: Math.round((grossValue - finalValue) * 100) / 100,
     multiple: totalInvested > 0 ? Math.round((finalValue / totalInvested) * 100) / 100 : 0,
     cagr: Math.round(cagr * 10000) / 100,
     xirr: Math.round(xirr * 10000) / 100,

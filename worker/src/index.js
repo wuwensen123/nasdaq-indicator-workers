@@ -219,7 +219,7 @@ export default {
     if (path === '/api/backtest' && request.method === 'POST') {
       try {
         const body = await request.json();
-        const { assets, amount, frequency, startDate, endDate, rebalance, investMode, investEndDate } = body;
+        const { assets, amount, frequency, startDate, endDate, rebalance, investMode, investEndDate, fees } = body;
         if (!assets || !assets.length || !amount || !startDate || !endDate) {
           return json({ success: false, error: '缺少参数' }, 400);
         }
@@ -232,7 +232,7 @@ export default {
           }
           assetData.push({ ...a, ...hist });
         }
-        const result = runBacktest({ assets: assetData, amount, frequency, startDate, endDate, rebalance: rebalance || 'none', investMode: investMode || 'dca', investEndDate });
+        const result = runBacktest({ assets: assetData, amount, frequency, startDate, endDate, rebalance: rebalance || 'none', investMode: investMode || 'dca', investEndDate, fees });
         return json({ success: true, ...result });
       } catch (e) {
         return json({ success: false, error: e.message }, 500);
@@ -250,7 +250,7 @@ export default {
         // 为每个方案获取资产历史数据并回测
         const results = [];
         for (const s of schemes) {
-          const { assets, amount, frequency, startDate, endDate, rebalance, investMode, investEndDate, label } = s;
+          const { assets, amount, frequency, startDate, endDate, rebalance, investMode, investEndDate, fees, label } = s;
           if (!assets || !assets.length || !amount || !startDate || !endDate) {
             return json({ success: false, error: `方案 "${label || '未命名'}" 缺少参数` }, 400);
           }
@@ -262,7 +262,7 @@ export default {
             }
             assetData.push({ ...a, ...hist });
           }
-          const result = runBacktest({ assets: assetData, amount, frequency, startDate, endDate, rebalance: rebalance || 'none', investMode: investMode || 'dca', investEndDate });
+          const result = runBacktest({ assets: assetData, amount, frequency, startDate, endDate, rebalance: rebalance || 'none', investMode: investMode || 'dca', investEndDate, fees });
           results.push({ label: label || '未命名', ...result });
         }
         return json({ success: true, schemes: results });

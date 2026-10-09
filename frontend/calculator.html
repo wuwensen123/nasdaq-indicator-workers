@@ -122,6 +122,20 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
             <input type="date" class="form-control" id="investEndDate" value="">
             <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">投入阶段结束后进入"平滑持有"，不再投入不卖出，持有到期末</div>
           </div>
+          <div class="mb-3">
+            <label class="form-label"><input type="checkbox" id="feeEnabled" onchange="toggleFees()"> 计算手续费（按标的市场默认费率）</label>
+            <div id="feePanel" style="display:none;margin-top:6px;padding:10px;border:1px solid var(--border-color);border-radius:8px;">
+              <div class="mb-2">
+                <label class="form-label" style="font-size:0.8rem;">自定义佣金率（%）<small>（留空=按市场默认：A股0.025%、美股0.03%）</small></label>
+                <input type="number" class="form-control" id="customCommission" value="" min="0" step="0.001" placeholder="如 0.02">
+              </div>
+              <div class="mb-2">
+                <label class="form-label" style="font-size:0.8rem;">每笔最低佣金（元）</label>
+                <input type="number" class="form-control" id="minCommission" value="" min="0" placeholder="如 A股5元、美股1美元">
+              </div>
+              <div style="font-size:0.75rem;color:var(--text-secondary);">费率说明：A股佣金0.025%+最低5元；美股佣金0.03%+最低1美元；QDII基金免印花税；期末卖出按卖出费扣减。</div>
+            </div>
+          </div>
           </div>
 
           <!-- 多方案对比模式 -->
@@ -236,6 +250,19 @@ function toggleInvestMode() {
     investEndRow.style.display = '';
     amountLabel.textContent = '每次定投金额（元）';
   }
+}
+
+function toggleFees() {
+  const enabled = document.getElementById('feeEnabled').checked;
+  document.getElementById('feePanel').style.display = enabled ? '' : 'none';
+}
+
+function collectFees() {
+  return {
+    enabled: document.getElementById('feeEnabled').checked,
+    customCommission: document.getElementById('customCommission').value || undefined,
+    minCommission: document.getElementById('minCommission').value || undefined,
+  };
 }
 
 // 页面加载时初始化显示状态
@@ -440,6 +467,7 @@ async function runBacktest() {
     investEndDate: document.getElementById('investEndDate').value || undefined,
     startDate: document.getElementById('startDate').value,
     endDate: document.getElementById('endDate').value,
+    fees: collectFees(),
   };
 
   const compareMode = document.getElementById('compareMode').value;
