@@ -2,13 +2,23 @@
  * 分析引擎 — 计算综合评分和投资策略
  */
 
+// ========== 历史分位锚点表（Phase 1 固定参照，Phase 3 换 D1 真分位） ==========
+// NDX trailing PE：历史区间 10.27-38.26，长期均值 25.71（GuruFocus 口径）
+const PE_PCT_NDX = [[10, 0], [15, 8], [20, 28], [25, 50], [27.7, 65], [30, 75], [33, 85], [36, 93], [38.5, 99]];
+// SPX trailing PE：长期均值 ~16，2026 高位区
+const PE_PCT_SPX = [[10, 1], [12, 6], [14, 18], [15.5, 35], [17, 55], [19, 70], [21, 82], [23, 90], [25, 94], [28, 97], [32, 99]];
+// S&P CAPE：中位 ~17.5，2000 峰值 44.2，2021 峰值 38.6（multpl 口径）
+const CAPE_PCT = [[10, 1], [13, 8], [15, 20], [17.5, 48], [20, 62], [25, 78], [30, 90], [35, 96], [38.6, 98.5], [44, 99.5]];
+
 export class Analyzer {
   constructor() {
     this.targets = [
-      { id: 'qqq', name: 'QQQ 纳斯达克100 ETF', symbol: 'QQQ', type: '美国ETF', indicators: ['vix', 'pe_qqq', 'fear_greed', 'rsi', 'put_call', 'yield_10y', 'dxy', 'ma200'],
-        weights: { vix: 0.20, pe_qqq: 0.20, fear_greed: 0.15, rsi: 0.15, put_call: 0.10, yield_10y: 0.10, dxy: 0.05, ma200: 0.05 }, pe_normal: 25 },
-      { id: 'voo', name: 'VOO 标普500 ETF', symbol: 'VOO', type: '美国ETF', indicators: ['vix', 'pe_sp500', 'fear_greed', 'rsi', 'put_call', 'yield_10y', 'dxy', 'ma200'],
-        weights: { vix: 0.20, pe_sp500: 0.20, fear_greed: 0.15, rsi: 0.15, put_call: 0.10, yield_10y: 0.10, dxy: 0.05, ma200: 0.05 }, pe_normal: 22 },
+      { id: 'qqq', name: 'QQQ 纳斯达克100 ETF', symbol: 'QQQ', type: '美国ETF', strategic: true, pe_family: 'ndx',
+        indicators: ['pe_composite', 'cape', 'erp', 'ma200_risk'],
+        weights: { pe_composite: 0.45, cape: 0.25, erp: 0.15, ma200_risk: 0.15 }, pe_normal: 25 },
+      { id: 'voo', name: 'VOO 标普500 ETF', symbol: 'VOO', type: '美国ETF', strategic: true, pe_family: 'spx',
+        indicators: ['pe_composite', 'cape', 'erp', 'ma200_risk'],
+        weights: { pe_composite: 0.45, cape: 0.25, erp: 0.15, ma200_risk: 0.15 }, pe_normal: 22 },
       { id: 'gld', name: '黄金 GLD ETF', symbol: 'GLD', type: '商品ETF', indicators: ['rsi', 'dxy', 'yield_10y', 'ma200', 'vix', 'fear_greed'],
         weights: { rsi: 0.20, dxy: 0.25, yield_10y: 0.20, ma200: 0.15, vix: 0.10, fear_greed: 0.10 }, pe_normal: null },
       { id: 'hsi', name: '恒生指数', symbol: '^HSI', type: '香港指数', indicators: ['pe_hsi', 'rsi', 'fear_greed', 'ma200', 'vix', 'dxy'],
@@ -36,6 +46,7 @@ export class Analyzer {
     const cfg = this.targets.find(t => t.id === targetId);
     if (!cfg) return null;
     const td = data[targetId] || {};
+    if (cfg.strategic) return this._analyzeStrategic(cfg, td, global);
 
     let weightedSum = 0, totalWeight = 0;
     const indicators = [];
@@ -94,6 +105,127 @@ export class Analyzer {
     return base;
   }
 
+  // ========== 战略×战术双层评分（美国ETF，十年定投导向） ==========
+  // 战略层：估值为主（PE综合45% + CAPE25% + ERP15% + MA200风控15%），分数 0=强烈买入 → 100=强烈卖出
+  // 战术层：情绪只在极端触发，作为定投节奏乘数（封顶[0.5,1.5]），不进入评分
+  // 依据：Vanguard(期初估值是10年收益最好预测器，情绪/技术在10年期≈0)、Faber 10月均线(唯一有百年证据的技术项，角色=回撤风控)
+  _analyzeStrategic(cfg, td, global) {
+    const pe = td.pe_ratio;
+    const y10 = global.treasury_10y?.value;
+    const cape = global.shiller_pe?.value;
+    const ma200pct = td.technical?.ma200_pct;
+    const w = cfg.weights;
+
+    // 1) PE综合估值 45%：forward 接入前(Phase 1)全部走 trailing 历史分位
+    const peScore = pe != null ? this._pctFromAnchors(pe, cfg.pe_family === 'spx' ? PE_PCT_SPX : PE_PCT_NDX) : null;
+    const peInd = this._mkInd('pe_composite', w.pe_composite, pe, peScore == null ? null : round(peScore), '', cfg.pe_family === 'spx' ? 'spx' : 'ndx');
+
+    // 2) CAPE 分位 25%（S&P 口径，长周期锚，分数≈历史分位）
+    const capeScore = cape != null ? this._pctFromAnchors(cape, CAPE_PCT) : null;
+    const capeInd = this._mkInd('cape', w.cape, cape, capeScore == null ? null : round(capeScore), '');
+
+    // 3) ERP 15%：forward PE 接入前用 trailing 基（1/PE − 10Y）
+    let erpVal = null, erpScore = null;
+    if (pe != null && y10 != null && pe > 0) {
+      erpVal = round(100 / pe - y10, 2);
+      erpScore = round(this._erpScore(erpVal));
+    }
+    const erpInd = this._mkInd('erp', w.erp, erpVal, erpScore, '%');
+
+    // 4) MA200 趋势风控 15%（Faber 证据：水下=回撤风险升高，不加速）
+    const maScore = ma200pct != null ? round(this._ma200RiskScore(ma200pct)) : null;
+    const maInd = this._mkInd('ma200_risk', w.ma200_risk, ma200pct, maScore, '%');
+
+    const indicators = [peInd, capeInd, erpInd, maInd];
+    let weightedSum = 0, totalWeight = 0;
+    for (const r of indicators) if (r.score != null) { weightedSum += r.score * r.weight; totalWeight += r.weight; }
+    const composite = totalWeight > 0 ? round(weightedSum / totalWeight) : null;
+
+    const pos = this._marketPosition(composite);
+    const base = this._strategy(composite);
+    const { coeff, reason } = this._tacticalCoeff(global.fear_greed?.value);
+    const strategy = this._applyTactical(base, coeff, reason);
+
+    const fw = (k) => `${this._indName(k)}×${w[k] * 100}%`;
+    return {
+      target_id: cfg.id, target_name: cfg.name, target_type: cfg.type, symbol: cfg.symbol,
+      current_price: td.current_price, composite_score: composite, market_position: pos.label,
+      position_color: pos.color, strategy, indicators,
+      formula: `战略评分 = ${fw('pe_composite')} + ${fw('cape')} + ${fw('erp')} + ${fw('ma200_risk')}｜最终倍数 = 基础倍数 × 情绪系数${coeff !== 1 ? `(${coeff})` : ''}`,
+      formula_detail: `十年定投双层架构：战略层只看估值与趋势（0=强烈买入→100=强烈卖出，估值项分数≈历史分位）；情绪/技术不做评分，仅在极端时以系数微调节奏（封顶0.5-1.5）。依据：Vanguard十年期研究、Faber均线风控`,
+    };
+  }
+
+  _mkInd(key, weight, value, score, unit, peFamily) {
+    const ni = this._indInfo(key);
+    const r = { score, label: 'N/A', value, weight, unit, name: ni.name, description: ni.desc };
+    if (score != null) r.label = this._strategicLabel(key, score, peFamily);
+    return r;
+  }
+
+  _strategicLabel(key, score, peFamily) {
+    if (key === 'pe_composite') {
+      const fam = peFamily === 'spx' ? '标普' : '纳指100';
+      return score < 30 ? `${fam}PE低估` : score < 55 ? `${fam}PE合理` : score < 75 ? `${fam}PE偏高` : score < 90 ? `${fam}PE高估` : `${fam}PE严重高估`;
+    }
+    if (key === 'cape') return score < 30 ? 'CAPE低估' : score < 55 ? 'CAPE合理' : score < 75 ? 'CAPE偏高' : score < 90 ? 'CAPE高估' : 'CAPE历史极值区';
+    if (key === 'erp') return score < 30 ? '股票相对债券便宜' : score < 55 ? '股票相对债券中性' : score < 75 ? '股票相对债券偏贵' : '股票相对债券昂贵';
+    if (key === 'ma200_risk') return score < 30 ? '趋势完好' : score < 55 ? '略低于均线' : score < 75 ? '跌破均线(不加速)' : '深度水下(回撤风险)';
+    return 'N/A';
+  }
+
+  // 分段线性插值：v → 历史分位(0-100)
+  _pctFromAnchors(v, anchors) {
+    if (v == null) return null;
+    if (v <= anchors[0][0]) return anchors[0][1];
+    for (let i = 1; i < anchors.length; i++) {
+      if (v <= anchors[i][0]) {
+        const [x0, y0] = anchors[i - 1], [x1, y1] = anchors[i];
+        return y0 + (v - x0) / (x1 - x0) * (y1 - y0);
+      }
+    }
+    return anchors[anchors.length - 1][1];
+  }
+
+  // ERP打分：≥+2%→10分 … <−2%→90+（机构口径：ERP越高股票越有吸引力）
+  _erpScore(v) {
+    if (v >= 2) return 10;
+    if (v >= 0) return 10 + (2 - v) / 2 * 35;
+    if (v >= -1) return 45 + (0 - v) * 25;
+    if (v >= -2) return 70 + (-1 - v) * 20;
+    return Math.min(95, 90 + (-2 - v) * 5);
+  }
+
+  // MA200风控打分（Faber方向）：线上越远越安全 → 低分；水下越深回撤风险越高 → 高分
+  _ma200RiskScore(v) {
+    if (v >= 15) return 15;
+    if (v >= 5) return 20 + (15 - v) / 10 * 10;
+    if (v >= 0) return 30 + v / 5 * 10;
+    if (v >= -5) return 40 + (-v) / 5 * 15;
+    if (v >= -10) return 55 + (-v - 5) / 5 * 15;
+    if (v >= -20) return 70 + (-v - 10) / 10 * 15;
+    return Math.min(95, 85 + (-v - 20) * 0.5);
+  }
+
+  // 战术层：情绪系数（只做极端触发，CNN官方分带：0-25极度恐惧 / 75-100极度贪婪）
+  _tacticalCoeff(fg) {
+    if (fg == null) return { coeff: 1, reason: null };
+    let coeff = 1; const reasons = [];
+    if (fg <= 25) { coeff *= 1.25; reasons.push(`极度恐惧${round(fg, 1)}，恐慌期保持并小幅加快节奏`); }
+    else if (fg >= 75) { coeff *= 0.75; reasons.push(`极度贪婪${round(fg, 1)}，亢奋期小幅放慢节奏`); }
+    // Phase 2: VIX/VIX3M > 1.15 → ×1.15 可叠加
+    coeff = Math.max(0.5, Math.min(1.5, round(coeff, 3)));
+    return { coeff, reason: reasons.join('；') || null };
+  }
+
+  // 应用情绪系数（仅作用于常规定投倍数；ALL IN/暂停/减仓等特殊状态不动）
+  _applyTactical(base, coeff, reason) {
+    if (coeff === 1 || !reason || ![0.5, 1, 2, 3].includes(base.multiple)) return base;
+    const m = Math.round(base.multiple * coeff * 100) / 100;
+    const fmt = x => String(parseFloat(x.toFixed(2)));
+    return { ...base, multiple: m, action: `${fmt(m)}倍定投`, description: `${base.description}｜情绪叠加×${coeff}：${reason}` };
+  }
+
   _marketPosition(s) {
     if (s == null) return { label: '数据不足', color: '#6c757d' };
     if (s <= 20) return { label: '历史低位', color: '#dc3545' };
@@ -123,6 +255,7 @@ export class Analyzer {
       pe_stock: '银行股市盈率', pe_utility: '电力股市盈率', pe_mining: '矿业股市盈率',
       dividend_yield: '股息率',
       rsi: 'RSI(14)', ma200: '200日均线偏离度',
+      pe_composite: 'PE综合估值', cape: 'CAPE周期调整市盈率', erp: '股权风险溢价ERP', ma200_risk: '200日趋势风控',
     };
     return names[k] || k;
   }
@@ -144,6 +277,10 @@ export class Analyzer {
       dividend_yield: { name: '股息率', desc: '分红收益率，越高越适合定投（参考华尔街红利策略）' },
       rsi: { name: 'RSI(14)相对强弱指标', desc: '技术指标，越高越超买' },
       ma200: { name: '200日均线偏离度', desc: '价格相对于200日均线的位置' },
+      pe_composite: { name: 'PE综合估值', desc: '市盈率历史分位（forward接入前用trailing）：forward与trailing内混合，主锚' },
+      cape: { name: 'CAPE周期调整市盈率', desc: '美股10年平滑估值（S&P口径），跨周期不可操纵的长周期锚，分数≈历史分位' },
+      erp: { name: '股权风险溢价ERP', desc: '盈利收益率−10年期国债收益率：持有股票相对无风险债权的补偿' },
+      ma200_risk: { name: '200日趋势风控', desc: 'Faber均线证据：水下回撤风险升高，不加速定投' },
     };
     return infos[k] || { name: k, desc: '' };
   }
