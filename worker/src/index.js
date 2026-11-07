@@ -113,7 +113,7 @@ async function fetchFreshData() {
   const peMap = {};
   await Promise.all(peTargets.map(async t => { peMap[t.id] = await fetcher.getPERatio(t.symbol, t.name); }));
   // 股息率/PB 仅抓取评分真正用到的标的，进一步省子请求配额
-  const needDY = (t) => t.strategic && t.indicators.includes('dy_spread_cn') && t.dy_source === 'td';
+  const needDY = (t) => t.strategic && t.dy_source === 'td' && (t.indicators.includes('dy_spread_cn') || t.indicators.includes('div_yield_level'));
   const needPB = (t) => t.strategic && t.indicators.includes('stock_pb');
   const divResults = await Promise.all(targets.map((t) =>
     needDY(t) ? fetcher.getDividendYield(t.symbol, peMap[t.id]?.value, t.type) : Promise.resolve({ value: null })

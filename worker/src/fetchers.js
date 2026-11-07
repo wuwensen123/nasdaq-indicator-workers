@@ -450,8 +450,13 @@ export class Fetcher {
       if (parts.length > 64) {
         const dy = parseFloat(parts[64]);
         if (!isNaN(dy) && dy > 0.1 && dy < 15) return { value: round(dy), source: '腾讯财经', updated_at: now() };
+        console.error('腾讯股息率字段异常', symbol, 'parts=' + parts.length, 'f64=' + parts[64]);
+      } else {
+        console.error('腾讯股息率响应过短', symbol, 'parts=' + parts.length, 'len=' + text.length);
       }
-    } catch {}
+    } catch (e) {
+      console.error('腾讯股息率请求失败', symbol, String(e?.message || e).slice(0, 80));
+    }
     // 方案1: 东方财富 push2 API（f186，兜底）
     try {
       const code = symbol.replace('.SS', '').replace('.SZ', '');
