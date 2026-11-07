@@ -84,10 +84,10 @@ async function fetchFreshData() {
   const start = Date.now();
   const targets = analyzer.getTargets();
 
-  const [vix, fearGreed, treasury, putCall, dxy, shillerPE, cnPE, realYield, goldRealPct, dxyPct, danjuan] = await Promise.all([
+  const [vix, fearGreed, treasury, putCall, dxy, shillerPE, realYield, goldRealPct, dxyPct, danjuan] = await Promise.all([
     fetcher.getVIX(), fetcher.getFearGreed(), fetcher.getTreasuryYield(),
     fetcher.getPutCallRatio(), fetcher.getDXY(), fetcher.getShillerPE(),
-    fetcher.getChinaIndexPE(), fetcher.getRealYield10Y(),
+    fetcher.getRealYield10Y(),
     fetcher.getGoldRealPricePercentile(), fetcher.getDXYPercentile(),
     fetcher.getDanjuanValuations(),
   ]);
@@ -95,7 +95,8 @@ async function fetchFreshData() {
   const globalData = {
     vix, fear_greed: fearGreed, treasury_10y: treasury,
     put_call_ratio: putCall, dxy, shiller_pe: shillerPE,
-    cn_market: cnPE,
+    // 中国市场估值改由蛋卷数据提供（省出 Workers 子请求配额，免费版单次限50）
+    cn_market: { shanghai_pe: null, csi300_pe: danjuan.map['沪深300']?.pe ?? null, source: danjuan.source },
     real_yield_10y: realYield, gold_real_pct: goldRealPct, dxy_pct: dxyPct,
     danjuan: { map: danjuan.map, source: danjuan.source, updated_at: danjuan.updated_at },
     updated_at: new Date().toISOString(),
@@ -104,23 +105,24 @@ async function fetchFreshData() {
   const targetsData = {};
   const results = [];
 
-  // 先并行获取所有 PE 数据（避免被 Yahoo Finance 阻塞）
-  const peResults = await Promise.all(targets.map(t =>
-    fetcher.getPERatio(t.symbol, t.name)
+  // PE 仅抓取真正依赖 td.pe_ratio 的标的（QQQ/VOO）——Workers 免费版单次调用限 50 个子请求，
+  // Yahoo PE 的 crumb 流程每个最多耗 3 个，其余标的估值已由蛋卷/腾讯/东财覆盖
+  const peTargets = targets.filter(t => t.strategic && (t.indicators.includes('pe_composite') || t.indicators.includes('erp')));
+  const peMap = {};
+  await Promise.all(peTargets.map(async t => { peMap[t.id] = await fetcher.getPERatio(t.symbol, t.name); }));
+  // 股息率/PB 仅抓取评分真正用到的标的，进一步省子请求配额
+  const needDY = (t) => t.strategic && t.indicators.includes('dy_spread_cn') && t.dy_source === 'td';
+  const needPB = (t) => t.strategic && t.indicators.includes('stock_pb');
+  const divResults = await Promise.all(targets.map((t) =>
+    needDY(t) ? fetcher.getDividendYield(t.symbol, peMap[t.id]?.value, t.type) : Promise.resolve({ value: null })
   ));
-  // 并行获取股息率（仅中国股票）
-  const divResults = await Promise.all(targets.map((t, i) =>
-    t.type.includes('中国') ? fetcher.getDividendYield(t.symbol, peResults[i].value, t.type) : Promise.resolve({ value: null })
-  ));
-  // 并行获取个股PB（仅中国股票，银行股估值主锚）
   const pbResults = await Promise.all(targets.map((t) =>
-    t.type.includes('中国') && t.symbol.endsWith('.SS') || t.type.includes('中国') && t.symbol.endsWith('.SZ')
-      ? fetcher.getStockPB(t.symbol) : Promise.resolve({ value: null })
+    needPB(t) ? fetcher.getStockPB(t.symbol) : Promise.resolve({ value: null })
   ));
   for (let i = 0; i < targets.length; i++) {
     targetsData[targets[i].id] = {
       name: targets[i].name, symbol: targets[i].symbol,
-      pe_ratio: peResults[i].value, pe_data: peResults[i],
+      pe_ratio: peMap[targets[i].id]?.value ?? null, pe_data: peMap[targets[i].id] ?? null,
       dividend_yield: divResults[i].value, pb: pbResults[i].value,
     };
   }

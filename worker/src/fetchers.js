@@ -76,7 +76,9 @@ async function fetchYahooTrailingPE(symbol) {
 
 export class Fetcher {
   // ========== VIX ==========
+  // 进程内短缓存：同一次 refresh 里 put_call 兜底会重复调用，省子请求
   async getVIX() {
+    if (this._vixCache && Date.now() - this._vixCache.ts < 60000) return this._vixCache.data;
     try {
       const d = await fetchJSON('https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?range=5d&interval=1d');
       const meta = d.chart?.result?.[0]?.meta;
@@ -85,7 +87,9 @@ export class Fetcher {
       const close = quotes.close?.filter(c => c != null);
       const value = meta.regularMarketPrice ?? close?.[close.length - 1];
       const change = close?.length >= 2 ? ((close[close.length - 1] - close[close.length - 2]) / close[close.length - 2]) * 100 : 0;
-      return { value: round(value), change: round(change), source: 'Yahoo Finance (^VIX)', updated_at: now() };
+      const data = { value: round(value), change: round(change), source: 'Yahoo Finance (^VIX)', updated_at: now() };
+      this._vixCache = { ts: Date.now(), data };
+      return data;
     } catch { return { value: null, change: 0, source: 'Yahoo Finance', updated_at: now() }; }
   }
 
@@ -333,7 +337,10 @@ export class Fetcher {
       if (data.f92 > 0 && data.f43 > 0) pb = (data.f43 / 100) / data.f92;
       if (pb == null && data.f167 != null) pb = data.f167 > 15 ? data.f167 / 100 : data.f167;
       if (pb != null && pb > 0.1 && pb < 30) return { value: round(pb, 2), source: '东方财富', updated_at: now() };
-    } catch {}
+      console.error('PB取值异常', symbol, JSON.stringify(data).slice(0, 120));
+    } catch (e) {
+      console.error('PB请求失败', symbol, String(e?.message || e).slice(0, 80));
+    }
     return { value: null, source: '东方财富', updated_at: now() };
   }
 
