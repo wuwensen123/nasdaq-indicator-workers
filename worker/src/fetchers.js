@@ -297,6 +297,29 @@ export class Fetcher {
     return { value: null, source: 'Yahoo Finance', updated_at: now() };
   }
 
+  // ========== 蛋卷基金指数估值（PE/PB + 近10年分位 + 股息率 + 参考债券收益率） ==========
+  async getDanjuanValuations() {
+    try {
+      const d = await fetchJSONWithHeaders('https://danjuanfunds.com/djapi/index_eva/dj', { 'Referer': 'https://danjuanfunds.com/' });
+      const items = d?.data?.items || [];
+      if (!items.length) throw new Error('空数据');
+      const map = {};
+      for (const it of items) {
+        map[it.name] = {
+          pe: it.pe ?? null, pb: it.pb ?? null,
+          pe_pct: it.pe_percentile != null ? round(it.pe_percentile * 100, 1) : null,
+          pb_pct: it.pb_percentile != null ? round(it.pb_percentile * 100, 1) : null,
+          dy: it.yeild != null ? round(it.yeild * 100, 2) : null,
+          bond_yield: it.bond_yeild != null ? round(it.bond_yeild * 100, 2) : null,
+          date: it.date || null,
+        };
+      }
+      return { map, source: '蛋卷基金', updated_at: now() };
+    } catch (e) {
+      return { map: {}, source: '蛋卷错误: ' + String(e?.message || e).slice(0, 40), updated_at: now() };
+    }
+  }
+
     // ========== PE Ratio ==========
   async getPERatio(symbol, name = '') {
     // 中国A股: 先用腾讯财经

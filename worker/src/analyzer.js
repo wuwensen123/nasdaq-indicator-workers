@@ -22,8 +22,9 @@ export class Analyzer {
       { id: 'gld', name: '黄金 GLD ETF', symbol: 'GLD', type: '商品ETF', strategic: true, tactical_fg: false,
         indicators: ['real_yield', 'gold_real_pct', 'dxy_pct', 'ma200_risk'],
         weights: { real_yield: 0.30, gold_real_pct: 0.25, dxy_pct: 0.20, ma200_risk: 0.25 }, pe_normal: null },
-      { id: 'hsi', name: '恒生指数', symbol: '^HSI', type: '香港指数', indicators: ['pe_hsi', 'rsi', 'fear_greed', 'ma200', 'vix', 'dxy'],
-        weights: { pe_hsi: 0.25, rsi: 0.20, fear_greed: 0.15, ma200: 0.15, vix: 0.15, dxy: 0.10 }, pe_normal: 12 },
+      { id: 'hsi', name: '恒生指数', symbol: '^HSI', type: '香港指数', strategic: true, tactical_fg: false, dj_index: '恒生指数', dy_source: 'danjuan', dy_map: 'hsi',
+        indicators: ['pe_pct_hist', 'erp_hk', 'div_yield_level', 'ma200_risk'],
+        weights: { pe_pct_hist: 0.30, erp_hk: 0.30, div_yield_level: 0.20, ma200_risk: 0.20 }, pe_normal: 12 },
       { id: 'dividend_low_vol_etf', name: '红利低波ETF(512890)', symbol: '512890.SS', type: '中国ETF', indicators: ['rsi', 'ma200', 'pe_shanghai', 'pe_csi300', 'dividend_yield'],
         weights: { rsi: 0.20, ma200: 0.20, pe_shanghai: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
       { id: 'dividend_low_vol_100', name: '红利低波100(930955)', symbol: '000300.SS', type: '中国指数', indicators: ['rsi', 'ma200', 'pe_shanghai', 'pe_csi300', 'dividend_yield'],
@@ -173,6 +174,25 @@ export class Analyzer {
       const v = global.dxy_pct?.value;
       return { value: v, score: v };
     }
+    if (key === 'pe_pct_hist') {
+      const dj = global.danjuan?.map?.[cfg.dj_index];
+      return { value: dj?.pe ?? null, score: dj?.pe_pct ?? null };
+    }
+    if (key === 'pb_pct_hist') {
+      const dj = global.danjuan?.map?.[cfg.dj_index];
+      return { value: dj?.pb ?? null, score: dj?.pb_pct ?? null };
+    }
+    if (key === 'erp_hk') {
+      const dj = global.danjuan?.map?.[cfg.dj_index];
+      const y10 = global.treasury_10y?.value;
+      if (dj?.pe == null || y10 == null || dj.pe <= 0) return { value: null, score: null, unit: '%' };
+      const v = round(100 / dj.pe - y10, 2);
+      return { value: v, score: round(this._erpScoreHK(v)), unit: '%' };
+    }
+    if (key === 'div_yield_level') {
+      const v = cfg.dy_source === 'danjuan' ? (global.danjuan?.map?.[cfg.dj_index]?.dy ?? null) : (td.dividend_yield ?? null);
+      return { value: v, score: v != null ? round(this._divYieldScore(v, cfg.dy_map || 'a_share')) : null, unit: '%' };
+    }
     return { value: null, score: null };
   }
 
@@ -194,6 +214,10 @@ export class Analyzer {
     if (key === 'real_yield') return score < 30 ? '实际利率低位(利多黄金)' : score < 55 ? '实际利率中性' : score < 75 ? '实际利率偏高(利空黄金)' : '实际利率高位(利空黄金)';
     if (key === 'gold_real_pct') return score < 30 ? '实际金价低估' : score < 55 ? '实际金价合理' : score < 75 ? '实际金价偏高' : score < 90 ? '实际金价高估' : '实际金价历史极值区';
     if (key === 'dxy_pct') return score < 30 ? '美元弱势(利多黄金)' : score < 60 ? '美元中性' : score < 80 ? '美元偏强(利空黄金)' : '美元历史高位(利空黄金)';
+    if (key === 'pe_pct_hist') return score < 30 ? 'PE历史低估' : score < 55 ? 'PE历史合理' : score < 75 ? 'PE历史偏高' : score < 90 ? 'PE历史高估' : 'PE历史极值区';
+    if (key === 'pb_pct_hist') return score < 30 ? 'PB历史低估' : score < 55 ? 'PB历史合理' : score < 75 ? 'PB历史偏高' : score < 90 ? 'PB历史高估' : 'PB历史极值区';
+    if (key === 'erp_hk') return score < 25 ? '港股ERP丰厚(极有吸引力)' : score < 50 ? '港股ERP偏正(有吸引力)' : score < 65 ? '港股ERP中性' : '港股ERP为负(债券占优)';
+    if (key === 'div_yield_level') return score < 30 ? '股息率丰厚' : score < 50 ? '股息率正常偏低' : score < 70 ? '股息率偏低' : '股息率历史低位';
     return 'N/A';
   }
 
@@ -227,6 +251,34 @@ export class Analyzer {
     if (v <= 2) return 35 + (v - 1) * 20;
     if (v <= 3) return 55 + (v - 2) * 20;
     return Math.min(90, 75 + (v - 3) * 15);
+  }
+
+  // 港股ERP打分（高息市场，ERP中枢高于美股；港币联系汇率 → 无风险利率用美债10Y）
+  _erpScoreHK(v) {
+    if (v >= 5) return 5;
+    if (v >= 3) return 5 + (5 - v) / 2 * 20;
+    if (v >= 1) return 25 + (3 - v) / 2 * 25;
+    if (v >= 0) return 50 + (1 - v) * 15;
+    if (v >= -1) return 65 + (-v) * 15;
+    return Math.min(95, 80 + (-1 - v) * 7.5);
+  }
+
+  // 股息率水平打分：越高越便宜 → 低分（hsi=恒生区间；a_share=A股区间）
+  _divYieldScore(v, market) {
+    if (market === 'hsi') {
+      if (v >= 4.5) return 15;
+      if (v >= 4) return 15 + (4.5 - v) / 0.5 * 15;
+      if (v >= 3.5) return 30 + (4 - v) / 0.5 * 15;
+      if (v >= 3) return 45 + (3.5 - v) / 0.5 * 15;
+      if (v >= 2.5) return 60 + (3 - v) / 0.5 * 15;
+      return Math.min(90, 75 + (2.5 - v) * 7.5);
+    }
+    if (v >= 6) return 10;
+    if (v >= 5) return 10 + (6 - v) * 8;
+    if (v >= 4) return 18 + (5 - v) * 17;
+    if (v >= 3) return 35 + (4 - v) * 20;
+    if (v >= 2) return 55 + (3 - v) * 20;
+    return Math.min(92, 75 + (2 - v) * 8);
   }
 
   // MA200风控打分（Faber方向）：线上越远越安全 → 低分；水下越深回撤风险越高 → 高分
@@ -290,6 +342,7 @@ export class Analyzer {
       rsi: 'RSI(14)', ma200: '200日均线偏离度',
       pe_composite: 'PE综合估值', cape: 'CAPE周期调整市盈率', erp: '股权风险溢价ERP', ma200_risk: '200日趋势风控',
       real_yield: '10年TIPS实际利率', gold_real_pct: '黄金实际价格分位', dxy_pct: '美元指数5年分位',
+      pe_pct_hist: 'PE历史分位', pb_pct_hist: 'PB历史分位', erp_hk: '港股ERP', div_yield_level: '股息率水平',
     };
     return names[k] || k;
   }
@@ -318,6 +371,10 @@ export class Analyzer {
       real_yield: { name: '10年TIPS实际利率', desc: '持金机会成本（FRED DFII10）。注：2022后央行购金使此链条减弱，权重已调低' },
       gold_real_pct: { name: '黄金实际价格分位', desc: '金价÷CPI后的50年历史分位——无现金流资产的长周期估值锚' },
       dxy_pct: { name: '美元指数5年分位', desc: '美元越强，以美元计价的黄金越承压（反向驱动）' },
+      pe_pct_hist: { name: 'PE历史分位', desc: '指数市盈率近10年历史分位（蛋卷基金口径），估值主锚' },
+      pb_pct_hist: { name: 'PB历史分位', desc: '市净率近10年历史分位（蛋卷基金口径）' },
+      erp_hk: { name: '港股ERP', desc: '盈利收益率−美债10Y（港币联系汇率下美债即港股无风险利率），中金口径' },
+      div_yield_level: { name: '股息率水平', desc: '指数股息率相对其历史区间的位置，越高越便宜' },
     };
     return infos[k] || { name: k, desc: '' };
   }

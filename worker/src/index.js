@@ -84,11 +84,12 @@ async function fetchFreshData() {
   const start = Date.now();
   const targets = analyzer.getTargets();
 
-  const [vix, fearGreed, treasury, putCall, dxy, shillerPE, cnPE, realYield, goldRealPct, dxyPct] = await Promise.all([
+  const [vix, fearGreed, treasury, putCall, dxy, shillerPE, cnPE, realYield, goldRealPct, dxyPct, danjuan] = await Promise.all([
     fetcher.getVIX(), fetcher.getFearGreed(), fetcher.getTreasuryYield(),
     fetcher.getPutCallRatio(), fetcher.getDXY(), fetcher.getShillerPE(),
     fetcher.getChinaIndexPE(), fetcher.getRealYield10Y(),
     fetcher.getGoldRealPricePercentile(), fetcher.getDXYPercentile(),
+    fetcher.getDanjuanValuations(),
   ]);
 
   const globalData = {
@@ -96,6 +97,7 @@ async function fetchFreshData() {
     put_call_ratio: putCall, dxy, shiller_pe: shillerPE,
     cn_market: cnPE,
     real_yield_10y: realYield, gold_real_pct: goldRealPct, dxy_pct: dxyPct,
+    danjuan: { map: danjuan.map, source: danjuan.source, updated_at: danjuan.updated_at },
     updated_at: new Date().toISOString(),
   };
 
