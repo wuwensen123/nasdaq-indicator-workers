@@ -441,7 +441,18 @@ export class Fetcher {
   }
 // ========== 股息率（中国 A 股） ==========
   async getDividendYield(symbol, peRatio, stockType) {
-    // 方案1: 东方财富 push2 API（从 Worker 调用，网络更稳定）
+    // 方案0: 腾讯财经字段64（TTM股息率）——东财 push2 对连续请求会掐连接，腾讯更稳
+    try {
+      const code = symbol.replace('.SS', '').replace('.SZ', '');
+      const mk = symbol.endsWith('.SS') ? 'sh' : 'sz';
+      const text = await fetchText('https://qt.gtimg.cn/q=' + mk + code);
+      const parts = text.split('~');
+      if (parts.length > 64) {
+        const dy = parseFloat(parts[64]);
+        if (!isNaN(dy) && dy > 0.1 && dy < 15) return { value: round(dy), source: '腾讯财经', updated_at: now() };
+      }
+    } catch {}
+    // 方案1: 东方财富 push2 API（f186，兜底）
     try {
       const code = symbol.replace('.SS', '').replace('.SZ', '');
       const market = symbol.endsWith('.SS') ? '1' : '0';

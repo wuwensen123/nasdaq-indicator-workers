@@ -44,18 +44,18 @@ export class Analyzer {
       { id: 'dividend_low_vol_100', name: '红利低波100(930955)', symbol: '000300.SS', type: '中国指数', strategic: true, tactical_fg: false, dj_index: '红利低波', dy_source: 'danjuan',
         indicators: ['dy_spread_cn', 'pe_pct_hist', 'pb_pct_hist', 'ma200_risk'],
         weights: { dy_spread_cn: 0.30, pe_pct_hist: 0.25, pb_pct_hist: 0.25, ma200_risk: 0.20 }, pe_normal: null },
-      { id: 'abc_bank', name: '农业银行(601288)', symbol: '601288.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td',
-        indicators: ['dy_spread_cn', 'pb_pct_hist', 'stock_pb', 'ma200_risk'],
-        weights: { dy_spread_cn: 0.30, pb_pct_hist: 0.25, stock_pb: 0.25, ma200_risk: 0.20 }, pe_normal: null },
-      { id: 'ccb_bank', name: '建设银行(601939)', symbol: '601939.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td',
-        indicators: ['dy_spread_cn', 'pb_pct_hist', 'stock_pb', 'ma200_risk'],
-        weights: { dy_spread_cn: 0.30, pb_pct_hist: 0.25, stock_pb: 0.25, ma200_risk: 0.20 }, pe_normal: null },
+      { id: 'abc_bank', name: '农业银行(601288)', symbol: '601288.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td', dy_map: 'bank',
+        indicators: ['div_yield_level', 'pb_pct_hist', 'stock_pb', 'ma200_risk'],
+        weights: { div_yield_level: 0.30, pb_pct_hist: 0.20, stock_pb: 0.25, ma200_risk: 0.25 }, pe_normal: null },
+      { id: 'ccb_bank', name: '建设银行(601939)', symbol: '601939.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td', dy_map: 'bank',
+        indicators: ['div_yield_level', 'pb_pct_hist', 'stock_pb', 'ma200_risk'],
+        weights: { div_yield_level: 0.30, pb_pct_hist: 0.20, stock_pb: 0.25, ma200_risk: 0.25 }, pe_normal: null },
       { id: 'yangtze_power', name: '长江电力(600900)', symbol: '600900.SS', type: '中国电力股', strategic: true, tactical_fg: false, dy_source: 'anchor', dy_anchor: DY_CDL_ANCHOR, dy_map: 'cdl', pe_family: 'cdl', pb_family: 'cdl',
         indicators: ['dy_spread_cn', 'pe_composite', 'stock_pb', 'ma200_risk'],
         weights: { dy_spread_cn: 0.35, pe_composite: 0.25, stock_pb: 0.20, ma200_risk: 0.20 }, pe_normal: null },
-      { id: 'cmb_bank', name: '招商银行(600036)', symbol: '600036.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td',
-        indicators: ['dy_spread_cn', 'pb_pct_hist', 'stock_pb', 'ma200_risk'],
-        weights: { dy_spread_cn: 0.30, pb_pct_hist: 0.25, stock_pb: 0.25, ma200_risk: 0.20 }, pe_normal: null },
+      { id: 'cmb_bank', name: '招商银行(600036)', symbol: '600036.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td', dy_map: 'bank',
+        indicators: ['div_yield_level', 'pb_pct_hist', 'stock_pb', 'ma200_risk'],
+        weights: { div_yield_level: 0.30, pb_pct_hist: 0.20, stock_pb: 0.25, ma200_risk: 0.25 }, pe_normal: null },
       { id: 'zijin_mining', name: '紫金矿业(601899)', symbol: '601899.SS', type: '中国矿业股', strategic: true, tactical_fg: false, pb_family: 'zj',
         indicators: ['copper_pct', 'gold_real_pct', 'stock_pb', 'ma200_risk'],
         weights: { copper_pct: 0.35, gold_real_pct: 0.15, stock_pb: 0.25, ma200_risk: 0.25 }, pe_normal: null },
@@ -308,6 +308,15 @@ export class Analyzer {
 
   // 股息率水平打分：越高越便宜 → 低分（hsi=恒生区间；a_share=A股区间）
   _divYieldScore(v, market) {
+    if (market === 'bank') {
+      // A股银行股息率历史区间约3-6.5%（2025重估行情后整体下移）
+      if (v >= 5.5) return 10;
+      if (v >= 4.5) return 10 + (5.5 - v) * 2;
+      if (v >= 4) return 30 + (4.5 - v) * 4;
+      if (v >= 3.5) return 50 + (4 - v) * 4;
+      if (v >= 3) return 70 + (3.5 - v) * 4;
+      return Math.min(95, 90 + (3 - v) * 5);
+    }
     if (market === 'hsi') {
       if (v >= 4.5) return 15;
       if (v >= 4) return 15 + (4.5 - v) / 0.5 * 15;
