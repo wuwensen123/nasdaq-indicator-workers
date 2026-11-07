@@ -320,6 +320,23 @@ export class Fetcher {
     }
   }
 
+  // ========== 个股PB（东方财富，银行股估值主锚） ==========
+  // 注: f167带×100缩放且字段口径不稳，用 价格(f43/100)÷每股净资产(f92) 自算，f167 兜底
+  async getStockPB(symbol) {
+    try {
+      const code = symbol.replace('.SS', '').replace('.SZ', '');
+      const market = symbol.endsWith('.SS') ? '1' : '0';
+      const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${market}.${code}&fields=f43,f92,f167`;
+      const d = await fetchJSON(url);
+      const data = d?.data || {};
+      let pb = null;
+      if (data.f92 > 0 && data.f43 > 0) pb = (data.f43 / 100) / data.f92;
+      if (pb == null && data.f167 != null) pb = data.f167 > 15 ? data.f167 / 100 : data.f167;
+      if (pb != null && pb > 0.1 && pb < 30) return { value: round(pb, 2), source: '东方财富', updated_at: now() };
+    } catch {}
+    return { value: null, source: '东方财富', updated_at: now() };
+  }
+
     // ========== PE Ratio ==========
   async getPERatio(symbol, name = '') {
     // 中国A股: 先用腾讯财经

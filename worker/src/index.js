@@ -112,11 +112,16 @@ async function fetchFreshData() {
   const divResults = await Promise.all(targets.map((t, i) =>
     t.type.includes('中国') ? fetcher.getDividendYield(t.symbol, peResults[i].value, t.type) : Promise.resolve({ value: null })
   ));
+  // 并行获取个股PB（仅中国股票，银行股估值主锚）
+  const pbResults = await Promise.all(targets.map((t) =>
+    t.type.includes('中国') && t.symbol.endsWith('.SS') || t.type.includes('中国') && t.symbol.endsWith('.SZ')
+      ? fetcher.getStockPB(t.symbol) : Promise.resolve({ value: null })
+  ));
   for (let i = 0; i < targets.length; i++) {
     targetsData[targets[i].id] = {
       name: targets[i].name, symbol: targets[i].symbol,
       pe_ratio: peResults[i].value, pe_data: peResults[i],
-      dividend_yield: divResults[i].value,
+      dividend_yield: divResults[i].value, pb: pbResults[i].value,
     };
   }
 

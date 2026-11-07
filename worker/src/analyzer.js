@@ -11,6 +11,8 @@ const PE_PCT_SPX = [[10, 1], [12, 6], [14, 18], [15.5, 35], [17, 55], [19, 70], 
 const CAPE_PCT = [[10, 1], [13, 8], [15, 20], [17.5, 48], [20, 62], [25, 78], [30, 90], [35, 96], [38.6, 98.5], [44, 99.5]];
 // 中国10年期国债收益率静态锚点（2026-11 中债约2.1-2.3%），股债利差用。中债API未开放免费接口，季度人工校准
 const CN10Y_ANCHOR = 2.2;
+// A股银行PB历史区间锚点（行业长期0.45-1.4，2025重估后中枢上移）
+const BANK_PB_PCT = [[0.45, 2], [0.55, 10], [0.65, 25], [0.75, 40], [0.85, 55], [0.95, 68], [1.05, 78], [1.2, 88], [1.4, 97]];
 
 export class Analyzer {
   constructor() {
@@ -33,14 +35,17 @@ export class Analyzer {
       { id: 'dividend_low_vol_100', name: '红利低波100(930955)', symbol: '000300.SS', type: '中国指数', strategic: true, tactical_fg: false, dj_index: '红利低波', dy_source: 'danjuan',
         indicators: ['dy_spread_cn', 'pe_pct_hist', 'pb_pct_hist', 'ma200_risk'],
         weights: { dy_spread_cn: 0.30, pe_pct_hist: 0.25, pb_pct_hist: 0.25, ma200_risk: 0.20 }, pe_normal: null },
-      { id: 'abc_bank', name: '农业银行(601288)', symbol: '601288.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300', 'dividend_yield'],
-        weights: { rsi: 0.20, ma200: 0.20, pe_stock: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
-      { id: 'ccb_bank', name: '建设银行(601939)', symbol: '601939.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300', 'dividend_yield'],
-        weights: { rsi: 0.20, ma200: 0.20, pe_stock: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
+      { id: 'abc_bank', name: '农业银行(601288)', symbol: '601288.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td',
+        indicators: ['dy_spread_cn', 'pb_pct_hist', 'stock_pb', 'ma200_risk'],
+        weights: { dy_spread_cn: 0.30, pb_pct_hist: 0.25, stock_pb: 0.25, ma200_risk: 0.20 }, pe_normal: null },
+      { id: 'ccb_bank', name: '建设银行(601939)', symbol: '601939.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td',
+        indicators: ['dy_spread_cn', 'pb_pct_hist', 'stock_pb', 'ma200_risk'],
+        weights: { dy_spread_cn: 0.30, pb_pct_hist: 0.25, stock_pb: 0.25, ma200_risk: 0.20 }, pe_normal: null },
       { id: 'yangtze_power', name: '长江电力(600900)', symbol: '600900.SS', type: '中国电力股', indicators: ['rsi', 'ma200', 'pe_utility', 'pe_csi300', 'dividend_yield'],
         weights: { rsi: 0.20, ma200: 0.20, pe_utility: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
-      { id: 'cmb_bank', name: '招商银行(600036)', symbol: '600036.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300', 'dividend_yield'],
-        weights: { rsi: 0.20, ma200: 0.20, pe_stock: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
+      { id: 'cmb_bank', name: '招商银行(600036)', symbol: '600036.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td',
+        indicators: ['dy_spread_cn', 'pb_pct_hist', 'stock_pb', 'ma200_risk'],
+        weights: { dy_spread_cn: 0.30, pb_pct_hist: 0.25, stock_pb: 0.25, ma200_risk: 0.20 }, pe_normal: null },
       { id: 'zijin_mining', name: '紫金矿业(601899)', symbol: '601899.SS', type: '中国矿业股', indicators: ['rsi', 'ma200', 'pe_mining', 'pe_csi300', 'dividend_yield'],
         weights: { rsi: 0.20, ma200: 0.20, pe_mining: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
     ];
@@ -182,6 +187,11 @@ export class Analyzer {
       const dj = global.danjuan?.map?.[cfg.dj_index];
       return { value: dj?.pe ?? null, score: dj?.pe_pct ?? null };
     }
+    if (key === 'stock_pb') {
+      // 个股PB绝对水平（A股银行长期区间 0.45-1.4，跨行相对位置）
+      const v = td.pb;
+      return { value: v, score: v != null ? round(this._pctFromAnchors(v, BANK_PB_PCT)) : null };
+    }
     if (key === 'pb_pct_hist') {
       const dj = global.danjuan?.map?.[cfg.dj_index];
       return { value: dj?.pb ?? null, score: dj?.pb_pct ?? null };
@@ -230,6 +240,7 @@ export class Analyzer {
     if (key === 'erp_hk') return score < 25 ? '港股ERP丰厚(极有吸引力)' : score < 50 ? '港股ERP偏正(有吸引力)' : score < 65 ? '港股ERP中性' : '港股ERP为负(债券占优)';
     if (key === 'div_yield_level') return score < 30 ? '股息率丰厚' : score < 50 ? '股息率正常偏低' : score < 70 ? '股息率偏低' : '股息率历史低位';
     if (key === 'dy_spread_cn') return score < 25 ? '股债利差丰厚(红利极有吸引力)' : score < 45 ? '股债利差偏正(红利有吸引力)' : score < 65 ? '股债利差中性' : '股债利差偏薄(债券占优)';
+    if (key === 'stock_pb') return score < 30 ? 'PB处低位' : score < 55 ? 'PB偏低' : score < 75 ? 'PB中位' : score < 90 ? 'PB偏高' : 'PB历史高位';
     return 'N/A';
   }
 
@@ -366,7 +377,7 @@ export class Analyzer {
       pe_composite: 'PE综合估值', cape: 'CAPE周期调整市盈率', erp: '股权风险溢价ERP', ma200_risk: '200日趋势风控',
       real_yield: '10年TIPS实际利率', gold_real_pct: '黄金实际价格分位', dxy_pct: '美元指数5年分位',
       pe_pct_hist: 'PE历史分位', pb_pct_hist: 'PB历史分位', erp_hk: '港股ERP', div_yield_level: '股息率水平',
-      dy_spread_cn: '股债利差',
+      dy_spread_cn: '股债利差', stock_pb: '个股PB水平',
     };
     return names[k] || k;
   }
@@ -400,6 +411,7 @@ export class Analyzer {
       erp_hk: { name: '港股ERP', desc: '盈利收益率−美债10Y（港币联系汇率下美债即港股无风险利率），中金口径' },
       div_yield_level: { name: '股息率水平', desc: '指数股息率相对其历史区间的位置，越高越便宜' },
       dy_spread_cn: { name: '股债利差', desc: '股息率−中国10Y国债（中金红利策略核心标尺，国债用静态锚点季度校准），越高红利越便宜' },
+      stock_pb: { name: '个股PB水平', desc: '个股市净率在A股银行历史区间(0.45-1.4)中的位置——银行股估值主锚（中金PB-ROE框架）' },
     };
     return infos[k] || { name: k, desc: '' };
   }
