@@ -22,6 +22,56 @@ async function fetchText(url) {
   return res.text();
 }
 
+// ========== Yahoo cookie+crumb 认证 ==========
+// quoteSummary 接口现已强制 crumb 校验（无 crumb 返回 Invalid Crumb），
+// 需先拿 cookie 再换 crumb，凭证在 isolate 内存中缓存 6 小时
+let yahooAuth = null; // { cookie, crumb, ts }
+
+async function getYahooAuth() {
+  if (yahooAuth && Date.now() - yahooAuth.ts < 6 * 3600 * 1000) return yahooAuth;
+  // 1. 获取 cookie
+  let cookie = '';
+  try {
+    const res1 = await fetch('https://fc.yahoo.com', { headers: { 'User-Agent': UA }, redirect: 'follow' });
+    const sc = res1.headers.getSetCookie ? res1.headers.getSetCookie() : [];
+    cookie = sc.map(c => c.split(';')[0]).join('; ');
+  } catch {}
+  if (!cookie) {
+    try {
+      const res1b = await fetch('https://finance.yahoo.com', { headers: { 'User-Agent': UA } });
+      const sc = res1b.headers.getSetCookie ? res1b.headers.getSetCookie() : [];
+      cookie = sc.map(c => c.split(';')[0]).join('; ');
+    } catch {}
+  }
+  if (!cookie) throw new Error('Yahoo cookie 获取失败');
+  // 2. 用 cookie 换 crumb
+  const res2 = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+    headers: { 'User-Agent': UA, 'Cookie': cookie, 'Referer': 'https://finance.yahoo.com/' },
+  });
+  if (!res2.ok) throw new Error(`HTTP ${res2.status}: getcrumb`);
+  const crumb = (await res2.text()).trim();
+  if (!crumb || crumb.length > 24 || crumb.includes('<')) throw new Error('Yahoo crumb 获取失败');
+  yahooAuth = { cookie, crumb, ts: Date.now() };
+  return yahooAuth;
+}
+
+async function fetchYahooTrailingPE(symbol) {
+  // crumb 失效（401/403）时清缓存重取一次
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { cookie, crumb } = await getYahooAuth();
+      const url = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/' + encodeURIComponent(symbol) + '?modules=summaryDetail&crumb=' + encodeURIComponent(crumb);
+      const res = await fetch(url, { headers: { 'User-Agent': UA, 'Cookie': cookie, 'Referer': 'https://finance.yahoo.com/' } });
+      if ((res.status === 401 || res.status === 403) && attempt === 0) { yahooAuth = null; continue; }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      const pe = d?.quoteSummary?.result?.[0]?.summaryDetail?.trailingPE?.raw;
+      return pe != null ? pe : null;
+    } catch { yahooAuth = null; }
+  }
+  return null;
+}
+
 export class Fetcher {
   // ========== VIX ==========
   async getVIX() {
@@ -169,20 +219,9 @@ export class Fetcher {
         }
       } catch {}
     }
-    // Yahoo Finance v10
+    // Yahoo Finance v10（cookie+crumb 认证，与官网网页口径一致）
     try {
-      const summary = await fetchJSONWithHeaders('https://query1.finance.yahoo.com/v10/finance/quoteSummary/' + encodeURIComponent(symbol) + '?modules=summaryDetail', {
-        'Referer': 'https://finance.yahoo.com/',
-      });
-      const pe = summary?.quoteSummary?.result?.[0]?.summaryDetail?.trailingPE?.raw;
-      if (pe != null && pe > 0 && pe < 200) return { value: round(pe), source: 'Yahoo Finance', updated_at: now(), name };
-    } catch {}
-    // Yahoo Finance v6
-    try {
-      const quote = await fetchJSONWithHeaders('https://query1.finance.yahoo.com/v6/finance/quote?symbols=' + encodeURIComponent(symbol), {
-        'Referer': 'https://finance.yahoo.com/',
-      });
-      const pe = quote?.quoteResponse?.result?.[0]?.trailingPE;
+      const pe = await fetchYahooTrailingPE(symbol);
       if (pe != null && pe > 0 && pe < 200) return { value: round(pe), source: 'Yahoo Finance', updated_at: now(), name };
     } catch {}
     // worldperatio.com (QQQ/VOO)
