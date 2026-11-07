@@ -19,8 +19,9 @@ export class Analyzer {
       { id: 'voo', name: 'VOO 标普500 ETF', symbol: 'VOO', type: '美国ETF', strategic: true, pe_family: 'spx',
         indicators: ['pe_composite', 'cape', 'erp', 'ma200_risk'],
         weights: { pe_composite: 0.45, cape: 0.25, erp: 0.15, ma200_risk: 0.15 }, pe_normal: 22 },
-      { id: 'gld', name: '黄金 GLD ETF', symbol: 'GLD', type: '商品ETF', indicators: ['rsi', 'dxy', 'yield_10y', 'ma200', 'vix', 'fear_greed'],
-        weights: { rsi: 0.20, dxy: 0.25, yield_10y: 0.20, ma200: 0.15, vix: 0.10, fear_greed: 0.10 }, pe_normal: null },
+      { id: 'gld', name: '黄金 GLD ETF', symbol: 'GLD', type: '商品ETF', strategic: true, tactical_fg: false,
+        indicators: ['real_yield', 'gold_real_pct', 'dxy_pct', 'ma200_risk'],
+        weights: { real_yield: 0.30, gold_real_pct: 0.25, dxy_pct: 0.20, ma200_risk: 0.25 }, pe_normal: null },
       { id: 'hsi', name: '恒生指数', symbol: '^HSI', type: '香港指数', indicators: ['pe_hsi', 'rsi', 'fear_greed', 'ma200', 'vix', 'dxy'],
         weights: { pe_hsi: 0.25, rsi: 0.20, fear_greed: 0.15, ma200: 0.15, vix: 0.15, dxy: 0.10 }, pe_normal: 12 },
       { id: 'dividend_low_vol_etf', name: '红利低波ETF(512890)', symbol: '512890.SS', type: '中国ETF', indicators: ['rsi', 'ma200', 'pe_shanghai', 'pe_csi300', 'dividend_yield'],
@@ -110,40 +111,22 @@ export class Analyzer {
   // 战术层：情绪只在极端触发，作为定投节奏乘数（封顶[0.5,1.5]），不进入评分
   // 依据：Vanguard(期初估值是10年收益最好预测器，情绪/技术在10年期≈0)、Faber 10月均线(唯一有百年证据的技术项，角色=回撤风控)
   _analyzeStrategic(cfg, td, global) {
-    const pe = td.pe_ratio;
-    const y10 = global.treasury_10y?.value;
-    const cape = global.shiller_pe?.value;
-    const ma200pct = td.technical?.ma200_pct;
     const w = cfg.weights;
-
-    // 1) PE综合估值 45%：forward 接入前(Phase 1)全部走 trailing 历史分位
-    const peScore = pe != null ? this._pctFromAnchors(pe, cfg.pe_family === 'spx' ? PE_PCT_SPX : PE_PCT_NDX) : null;
-    const peInd = this._mkInd('pe_composite', w.pe_composite, pe, peScore == null ? null : round(peScore), '', cfg.pe_family === 'spx' ? 'spx' : 'ndx');
-
-    // 2) CAPE 分位 25%（S&P 口径，长周期锚，分数≈历史分位）
-    const capeScore = cape != null ? this._pctFromAnchors(cape, CAPE_PCT) : null;
-    const capeInd = this._mkInd('cape', w.cape, cape, capeScore == null ? null : round(capeScore), '');
-
-    // 3) ERP 15%：forward PE 接入前用 trailing 基（1/PE − 10Y）
-    let erpVal = null, erpScore = null;
-    if (pe != null && y10 != null && pe > 0) {
-      erpVal = round(100 / pe - y10, 2);
-      erpScore = round(this._erpScore(erpVal));
+    const indicators = [];
+    for (const key of cfg.indicators) {
+      const { value, score, unit, family } = this._strategicScore(key, cfg, td, global);
+      indicators.push(this._mkInd(key, w[key], value, score, unit || '', family));
     }
-    const erpInd = this._mkInd('erp', w.erp, erpVal, erpScore, '%');
-
-    // 4) MA200 趋势风控 15%（Faber 证据：水下=回撤风险升高，不加速）
-    const maScore = ma200pct != null ? round(this._ma200RiskScore(ma200pct)) : null;
-    const maInd = this._mkInd('ma200_risk', w.ma200_risk, ma200pct, maScore, '%');
-
-    const indicators = [peInd, capeInd, erpInd, maInd];
     let weightedSum = 0, totalWeight = 0;
     for (const r of indicators) if (r.score != null) { weightedSum += r.score * r.weight; totalWeight += r.weight; }
     const composite = totalWeight > 0 ? round(weightedSum / totalWeight) : null;
 
     const pos = this._marketPosition(composite);
     const base = this._strategy(composite);
-    const { coeff, reason } = this._tacticalCoeff(global.fear_greed?.value);
+    let coeff = 1, reason = null;
+    if (cfg.tactical_fg !== false) {
+      ({ coeff, reason } = this._tacticalCoeff(global.fear_greed?.value));
+    }
     const strategy = this._applyTactical(base, coeff, reason);
 
     const fw = (k) => `${this._indName(k)}×${w[k] * 100}%`;
@@ -151,15 +134,52 @@ export class Analyzer {
       target_id: cfg.id, target_name: cfg.name, target_type: cfg.type, symbol: cfg.symbol,
       current_price: td.current_price, composite_score: composite, market_position: pos.label,
       position_color: pos.color, strategy, indicators,
-      formula: `战略评分 = ${fw('pe_composite')} + ${fw('cape')} + ${fw('erp')} + ${fw('ma200_risk')}｜最终倍数 = 基础倍数 × 情绪系数${coeff !== 1 ? `(${coeff})` : ''}`,
-      formula_detail: `十年定投双层架构：战略层只看估值与趋势（0=强烈买入→100=强烈卖出，估值项分数≈历史分位）；情绪/技术不做评分，仅在极端时以系数微调节奏（封顶0.5-1.5）。依据：Vanguard十年期研究、Faber均线风控`,
+      formula: `战略评分 = ${cfg.indicators.map(fw).join(' + ')}${cfg.tactical_fg !== false ? `｜最终倍数 = 基础倍数 × 情绪系数${coeff !== 1 ? `(${coeff})` : ''}` : '（黄金无情绪叠加：金价趋势已含恐慌定价）'}`,
+      formula_detail: `十年定投双层架构：战略层只看基本面代理与趋势（0=强烈买入→100=强烈卖出，估值/分位项分数≈历史分位）；情绪/技术不做评分。依据：Vanguard十年期研究、Faber均线风控`,
     };
   }
 
-  _mkInd(key, weight, value, score, unit, peFamily) {
+  // 各战略指标取值+打分（0=强烈买入 → 100=强烈卖出）
+  _strategicScore(key, cfg, td, global) {
+    if (key === 'pe_composite') {
+      const pe = td.pe_ratio;
+      const score = pe != null ? this._pctFromAnchors(pe, cfg.pe_family === 'spx' ? PE_PCT_SPX : PE_PCT_NDX) : null;
+      return { value: pe, score: score == null ? null : round(score), family: cfg.pe_family };
+    }
+    if (key === 'cape') {
+      const cape = global.shiller_pe?.value;
+      const score = cape != null ? this._pctFromAnchors(cape, CAPE_PCT) : null;
+      return { value: cape, score: score == null ? null : round(score) };
+    }
+    if (key === 'erp') {
+      const pe = td.pe_ratio, y10 = global.treasury_10y?.value;
+      if (pe == null || y10 == null || pe <= 0) return { value: null, score: null, unit: '%' };
+      const v = round(100 / pe - y10, 2);
+      return { value: v, score: round(this._erpScore(v)), unit: '%' };
+    }
+    if (key === 'ma200_risk') {
+      const v = td.technical?.ma200_pct;
+      return { value: v, score: v != null ? round(this._ma200RiskScore(v)) : null, unit: '%' };
+    }
+    if (key === 'real_yield') {
+      const v = global.real_yield_10y?.value;
+      return { value: v, score: v != null ? round(this._realYieldScore(v)) : null, unit: '%' };
+    }
+    if (key === 'gold_real_pct') {
+      const v = global.gold_real_pct?.value;
+      return { value: v, score: v };
+    }
+    if (key === 'dxy_pct') {
+      const v = global.dxy_pct?.value;
+      return { value: v, score: v };
+    }
+    return { value: null, score: null };
+  }
+
+  _mkInd(key, weight, value, score, unit, family) {
     const ni = this._indInfo(key);
     const r = { score, label: 'N/A', value, weight, unit, name: ni.name, description: ni.desc };
-    if (score != null) r.label = this._strategicLabel(key, score, peFamily);
+    if (score != null) r.label = this._strategicLabel(key, score, family);
     return r;
   }
 
@@ -171,6 +191,9 @@ export class Analyzer {
     if (key === 'cape') return score < 30 ? 'CAPE低估' : score < 55 ? 'CAPE合理' : score < 75 ? 'CAPE偏高' : score < 90 ? 'CAPE高估' : 'CAPE历史极值区';
     if (key === 'erp') return score < 30 ? '股票相对债券便宜' : score < 55 ? '股票相对债券中性' : score < 75 ? '股票相对债券偏贵' : '股票相对债券昂贵';
     if (key === 'ma200_risk') return score < 30 ? '趋势完好' : score < 55 ? '略低于均线' : score < 75 ? '跌破均线(不加速)' : '深度水下(回撤风险)';
+    if (key === 'real_yield') return score < 30 ? '实际利率低位(利多黄金)' : score < 55 ? '实际利率中性' : score < 75 ? '实际利率偏高(利空黄金)' : '实际利率高位(利空黄金)';
+    if (key === 'gold_real_pct') return score < 30 ? '实际金价低估' : score < 55 ? '实际金价合理' : score < 75 ? '实际金价偏高' : score < 90 ? '实际金价高估' : '实际金价历史极值区';
+    if (key === 'dxy_pct') return score < 30 ? '美元弱势(利多黄金)' : score < 60 ? '美元中性' : score < 80 ? '美元偏强(利空黄金)' : '美元历史高位(利空黄金)';
     return 'N/A';
   }
 
@@ -194,6 +217,16 @@ export class Analyzer {
     if (v >= -1) return 45 + (0 - v) * 25;
     if (v >= -2) return 70 + (-1 - v) * 20;
     return Math.min(95, 90 + (-2 - v) * 5);
+  }
+
+  // 实际利率打分（黄金机会成本）：实际收益率越高 → 持金成本越高 → 高分（利空）
+  // 注：2022后央行购金使此链条减弱（PIMCO/RBC/Apollo），故权重30%而非主导
+  _realYieldScore(v) {
+    if (v <= 0) return 15;
+    if (v <= 1) return 15 + v * 20;
+    if (v <= 2) return 35 + (v - 1) * 20;
+    if (v <= 3) return 55 + (v - 2) * 20;
+    return Math.min(90, 75 + (v - 3) * 15);
   }
 
   // MA200风控打分（Faber方向）：线上越远越安全 → 低分；水下越深回撤风险越高 → 高分
@@ -256,6 +289,7 @@ export class Analyzer {
       dividend_yield: '股息率',
       rsi: 'RSI(14)', ma200: '200日均线偏离度',
       pe_composite: 'PE综合估值', cape: 'CAPE周期调整市盈率', erp: '股权风险溢价ERP', ma200_risk: '200日趋势风控',
+      real_yield: '10年TIPS实际利率', gold_real_pct: '黄金实际价格分位', dxy_pct: '美元指数5年分位',
     };
     return names[k] || k;
   }
@@ -281,6 +315,9 @@ export class Analyzer {
       cape: { name: 'CAPE周期调整市盈率', desc: '美股10年平滑估值（S&P口径），跨周期不可操纵的长周期锚，分数≈历史分位' },
       erp: { name: '股权风险溢价ERP', desc: '盈利收益率−10年期国债收益率：持有股票相对无风险债权的补偿' },
       ma200_risk: { name: '200日趋势风控', desc: 'Faber均线证据：水下回撤风险升高，不加速定投' },
+      real_yield: { name: '10年TIPS实际利率', desc: '持金机会成本（FRED DFII10）。注：2022后央行购金使此链条减弱，权重已调低' },
+      gold_real_pct: { name: '黄金实际价格分位', desc: '金价÷CPI后的50年历史分位——无现金流资产的长周期估值锚' },
+      dxy_pct: { name: '美元指数5年分位', desc: '美元越强，以美元计价的黄金越承压（反向驱动）' },
     };
     return infos[k] || { name: k, desc: '' };
   }

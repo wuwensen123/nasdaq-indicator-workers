@@ -3,6 +3,8 @@
  */
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+// FRED 对完整浏览器 UA + 非浏览器 TLS 指纹会 tarpit（实测 Chrome/120 UA 12s+ 无响应，短 UA 正常），FRED 请求专用
+const UA_PLAIN = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
 
 async function fetchJSON(url) {
   const res = await fetch(url, { headers: { 'User-Agent': UA } });
@@ -211,6 +213,88 @@ export class Fetcher {
       }
     } catch {}
     return { value: null, source: 'multpl.com', updated_at: now() };
+  }
+
+  // ========== 10年期TIPS实际收益率（黄金的机会成本锚） ==========
+  // 主源 FRED DFII10；Workers 出口对 FRED 会收到 HTTP 520，兜底用美国财政部官方 XML
+  async getRealYield10Y() {
+    try {
+      const csv = await fetch('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFII10', { headers: { 'User-Agent': UA_PLAIN } }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); });
+      const lines = csv.trim().split('\n');
+      for (let i = lines.length - 1; i >= 1; i--) {
+        const v = parseFloat(lines[i].split(',')[1]);
+        if (!isNaN(v)) return { value: round(v), source: 'FRED (DFII10)', updated_at: now() };
+      }
+    } catch {}
+    try {
+      const xml = await fetch('https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_real_yield_curve&field_tdr_date_value=' + new Date().getUTCFullYear(), { headers: { 'User-Agent': UA_PLAIN } }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); });
+      const vals = [...xml.matchAll(/<d:TC_10YEAR[^>]*>([0-9.\-]+)</g)].map(m => parseFloat(m[1])).filter(v => !isNaN(v));
+      if (vals.length) return { value: round(vals[vals.length - 1]), source: 'Treasury.gov', updated_at: now() };
+    } catch {}
+    return { value: null, source: 'FRED+Treasury均失败', updated_at: now() };
+  }
+
+  // ========== 黄金实际价格历史分位（GC=F月线 ÷ CPI，黄金的"CAPE"） ==========
+  // CPI 主源 FRED；Workers 出口 520 时兜底 multpl.com 月度 CPI 表
+  async getCpiMap() {
+    try {
+      const csv = await fetch('https://fred.stlouisfed.org/graph/fredgraph.csv?id=CPIAUCSL', { headers: { 'User-Agent': UA_PLAIN } }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); });
+      const map = new Map();
+      for (const line of csv.trim().split('\n').slice(1)) {
+        const [d, v] = line.split(',');
+        const c = parseFloat(v);
+        if (!isNaN(c)) map.set(d.slice(0, 7), c);
+      }
+      if (map.size > 120) return map;
+    } catch {}
+    try {
+      const html = await fetchText('https://www.multpl.com/cpi/table/by-month');
+      const M = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' };
+      const rows = [...html.matchAll(/<td>([A-Z][a-z]{2})\s+\d{1,2},\s*(\d{4})<\/td>\s*<td>[^0-9]*([0-9.]+)/g)];
+      const map = new Map();
+      for (const [, mon, yr, v] of rows) map.set(`${yr}-${M[mon]}`, parseFloat(v));
+      if (map.size > 120) return map;
+    } catch {}
+    return null;
+  }
+
+  async getGoldRealPricePercentile() {
+    try {
+      const [chart, cpiMap] = await Promise.all([
+        fetchJSON('https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=max&interval=1mo'),
+        this.getCpiMap(),
+      ]);
+      if (!cpiMap) return { value: null, current: null, source: 'CPI两个源均失败', updated_at: now() };
+      const stamps = chart.chart?.result?.[0]?.timestamp || [];
+      const closes = chart.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
+      const cpiLatest = [...cpiMap.values()].pop();
+      const real = [];
+      for (let i = 0; i < stamps.length; i++) {
+        if (closes[i] == null) continue;
+        const m = new Date(stamps[i] * 1000).toISOString().slice(0, 7);
+        const c = cpiMap.get(m);
+        if (c) real.push(closes[i] * (cpiLatest / c));
+      }
+      if (real.length < 120) return { value: null, current: null, source: '数据不足:' + real.length, updated_at: now() };
+      const cur = real[real.length - 1];
+      const pct = real.filter(x => x <= cur).length / real.length * 100;
+      return { value: round(pct, 1), current: round(cur, 0), source: 'Yahoo(GC=F)+CPI', updated_at: now() };
+    } catch (e) {
+      return { value: null, current: null, source: '金价分位错误: ' + String(e?.message || e).slice(0, 60), updated_at: now() };
+    }
+  }
+
+  // ========== DXY 五年周线分位 ==========
+  async getDXYPercentile() {
+    try {
+      const d = await fetchJSON('https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?range=5y&interval=1wk');
+      const closes = (d.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []).filter(c => c != null);
+      if (closes.length < 100) return { value: null, source: 'Yahoo Finance', updated_at: now() };
+      const cur = closes[closes.length - 1];
+      const pct = closes.filter(x => x <= cur).length / closes.length * 100;
+      return { value: round(pct, 1), current: round(cur), source: 'Yahoo Finance (5y周线)', updated_at: now() };
+    } catch {}
+    return { value: null, source: 'Yahoo Finance', updated_at: now() };
   }
 
     // ========== PE Ratio ==========
