@@ -84,11 +84,12 @@ async function fetchFreshData() {
   const start = Date.now();
   const targets = analyzer.getTargets();
 
-  const [vix, fearGreed, treasury, putCall, dxy, shillerPE, realYield, goldRealPct, dxyPct, danjuan] = await Promise.all([
+  const [vix, fearGreed, treasury, putCall, dxy, shillerPE, realYield, goldRealPct, dxyPct, copperPct, danjuan] = await Promise.all([
     fetcher.getVIX(), fetcher.getFearGreed(), fetcher.getTreasuryYield(),
     fetcher.getPutCallRatio(), fetcher.getDXY(), fetcher.getShillerPE(),
     fetcher.getRealYield10Y(),
     fetcher.getGoldRealPricePercentile(), fetcher.getDXYPercentile(),
+    fetcher.getCommodityPercentile('HG=F', 'COMEX铜'),
     fetcher.getDanjuanValuations(),
   ]);
 
@@ -98,6 +99,7 @@ async function fetchFreshData() {
     // 中国市场估值改由蛋卷数据提供（省出 Workers 子请求配额，免费版单次限50）
     cn_market: { shanghai_pe: null, csi300_pe: danjuan.map['沪深300']?.pe ?? null, source: danjuan.source },
     real_yield_10y: realYield, gold_real_pct: goldRealPct, dxy_pct: dxyPct,
+    copper_pct: copperPct,
     danjuan: { map: danjuan.map, source: danjuan.source, updated_at: danjuan.updated_at },
     updated_at: new Date().toISOString(),
   };

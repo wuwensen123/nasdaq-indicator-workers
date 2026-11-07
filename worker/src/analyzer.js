@@ -9,10 +9,19 @@ const PE_PCT_NDX = [[10, 0], [15, 8], [20, 28], [25, 50], [27.7, 65], [30, 75], 
 const PE_PCT_SPX = [[10, 1], [12, 6], [14, 18], [15.5, 35], [17, 55], [19, 70], [21, 82], [23, 90], [25, 94], [28, 97], [32, 99]];
 // S&P CAPE：中位 ~17.5，2000 峰值 44.2，2021 峰值 38.6（multpl 口径）
 const CAPE_PCT = [[10, 1], [13, 8], [15, 20], [17.5, 48], [20, 62], [25, 78], [30, 90], [35, 96], [38.6, 98.5], [44, 99.5]];
-// 中国10年期国债收益率静态锚点（2026-11 中债约2.1-2.3%），股债利差用。中债API未开放免费接口，季度人工校准
-const CN10Y_ANCHOR = 2.2;
+// 中国10年期国债收益率静态锚点（2026-11 中债10Y约1.61-1.69%，取1.8留保守余量），股债利差用。
+// 中债API无免费接口，季度人工校准
+const CN10Y_ANCHOR = 1.8;
 // A股银行PB历史区间锚点（行业长期0.45-1.4，2025重估后中枢上移）
 const BANK_PB_PCT = [[0.45, 2], [0.55, 10], [0.65, 25], [0.75, 40], [0.85, 55], [0.95, 68], [1.05, 78], [1.2, 88], [1.4, 97]];
+// 长江电力 PE/PB 历史区间锚点（2014低点PE10倍出头/股息率5%+；近年PE 19-22、PB 3.0-3.3）
+const PE_PCT_CDL = [[11, 3], [13, 10], [15, 22], [17, 40], [19, 55], [20, 62], [21, 70], [22, 78], [24, 90], [26, 97]];
+const CDL_PB_PCT = [[2.0, 5], [2.4, 15], [2.7, 30], [3.0, 48], [3.2, 60], [3.4, 72], [3.6, 85], [3.9, 95]];
+// 紫金矿业 PB 历史区间锚点（周期股PB宽幅2.2-7）
+const ZJ_PB_PCT = [[2.2, 5], [2.8, 15], [3.4, 30], [4.0, 48], [4.6, 62], [5.2, 75], [6.0, 88], [7.0, 97]];
+// 长江电力股息率静态锚点（2026-11约3.5-3.7%：承诺2026-2030分红率≥70%，EPS约1.45）。
+// 东财f186对600900返回坏数据(0.61%)，季度人工校准
+const DY_CDL_ANCHOR = 3.6;
 
 export class Analyzer {
   constructor() {
@@ -41,13 +50,15 @@ export class Analyzer {
       { id: 'ccb_bank', name: '建设银行(601939)', symbol: '601939.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td',
         indicators: ['dy_spread_cn', 'pb_pct_hist', 'stock_pb', 'ma200_risk'],
         weights: { dy_spread_cn: 0.30, pb_pct_hist: 0.25, stock_pb: 0.25, ma200_risk: 0.20 }, pe_normal: null },
-      { id: 'yangtze_power', name: '长江电力(600900)', symbol: '600900.SS', type: '中国电力股', indicators: ['rsi', 'ma200', 'pe_utility', 'pe_csi300', 'dividend_yield'],
-        weights: { rsi: 0.20, ma200: 0.20, pe_utility: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
+      { id: 'yangtze_power', name: '长江电力(600900)', symbol: '600900.SS', type: '中国电力股', strategic: true, tactical_fg: false, dy_source: 'anchor', dy_anchor: DY_CDL_ANCHOR, dy_map: 'cdl', pe_family: 'cdl', pb_family: 'cdl',
+        indicators: ['dy_spread_cn', 'pe_composite', 'stock_pb', 'ma200_risk'],
+        weights: { dy_spread_cn: 0.35, pe_composite: 0.25, stock_pb: 0.20, ma200_risk: 0.20 }, pe_normal: null },
       { id: 'cmb_bank', name: '招商银行(600036)', symbol: '600036.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td',
         indicators: ['dy_spread_cn', 'pb_pct_hist', 'stock_pb', 'ma200_risk'],
         weights: { dy_spread_cn: 0.30, pb_pct_hist: 0.25, stock_pb: 0.25, ma200_risk: 0.20 }, pe_normal: null },
-      { id: 'zijin_mining', name: '紫金矿业(601899)', symbol: '601899.SS', type: '中国矿业股', indicators: ['rsi', 'ma200', 'pe_mining', 'pe_csi300', 'dividend_yield'],
-        weights: { rsi: 0.20, ma200: 0.20, pe_mining: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
+      { id: 'zijin_mining', name: '紫金矿业(601899)', symbol: '601899.SS', type: '中国矿业股', strategic: true, tactical_fg: false, pb_family: 'zj',
+        indicators: ['copper_pct', 'gold_real_pct', 'stock_pb', 'ma200_risk'],
+        weights: { copper_pct: 0.35, gold_real_pct: 0.15, stock_pb: 0.25, ma200_risk: 0.25 }, pe_normal: null },
     ];
   }
 
@@ -153,7 +164,8 @@ export class Analyzer {
   _strategicScore(key, cfg, td, global) {
     if (key === 'pe_composite') {
       const pe = td.pe_ratio;
-      const score = pe != null ? this._pctFromAnchors(pe, cfg.pe_family === 'spx' ? PE_PCT_SPX : PE_PCT_NDX) : null;
+      const tbl = cfg.pe_family === 'spx' ? PE_PCT_SPX : cfg.pe_family === 'cdl' ? PE_PCT_CDL : PE_PCT_NDX;
+      const score = pe != null ? this._pctFromAnchors(pe, tbl) : null;
       return { value: pe, score: score == null ? null : round(score), family: cfg.pe_family };
     }
     if (key === 'cape') {
@@ -188,9 +200,14 @@ export class Analyzer {
       return { value: dj?.pe ?? null, score: dj?.pe_pct ?? null };
     }
     if (key === 'stock_pb') {
-      // 个股PB绝对水平（A股银行长期区间 0.45-1.4，跨行相对位置）
+      // 个股PB绝对水平（按 cfg.pb_family 选锚点表：bank=A股银行 / cdl=长电 / zj=紫金）
       const v = td.pb;
-      return { value: v, score: v != null ? round(this._pctFromAnchors(v, BANK_PB_PCT)) : null };
+      const tbl = cfg.pb_family === 'cdl' ? CDL_PB_PCT : cfg.pb_family === 'zj' ? ZJ_PB_PCT : BANK_PB_PCT;
+      return { value: v, score: v != null ? round(this._pctFromAnchors(v, tbl)) : null };
+    }
+    if (key === 'copper_pct') {
+      const v = global.copper_pct?.value;
+      return { value: v, score: v };
     }
     if (key === 'pb_pct_hist') {
       const dj = global.danjuan?.map?.[cfg.dj_index];
@@ -208,11 +225,13 @@ export class Analyzer {
       return { value: v, score: v != null ? round(this._divYieldScore(v, cfg.dy_map || 'a_share')) : null, unit: '%' };
     }
     if (key === 'dy_spread_cn') {
-      // 股债利差：股息率 − 中国10Y国债（中金红利策略核心标尺）
-      const dy = cfg.dy_source === 'danjuan' ? (global.danjuan?.map?.[cfg.dj_index]?.dy ?? null) : (td.dividend_yield ?? null);
+      // 股债利差：股息率 − 中国10Y国债（中金红利策略核心标尺；cdl=长电类债息差口径）
+      const dy = cfg.dy_source === 'danjuan' ? (global.danjuan?.map?.[cfg.dj_index]?.dy ?? null)
+        : cfg.dy_source === 'anchor' ? cfg.dy_anchor
+        : (td.dividend_yield ?? null);
       if (dy == null) return { value: null, score: null, unit: '%' };
       const v = round(dy - CN10Y_ANCHOR, 2);
-      return { value: v, score: round(this._dySpreadScore(v)), unit: '%' };
+      return { value: v, score: round(this._dySpreadScore(v, cfg.dy_map === 'cdl' ? 'cdl' : 'hongli')), unit: '%' };
     }
     return { value: null, score: null };
   }
@@ -226,8 +245,8 @@ export class Analyzer {
 
   _strategicLabel(key, score, peFamily) {
     if (key === 'pe_composite') {
-      const fam = peFamily === 'spx' ? '标普' : '纳指100';
-      return score < 30 ? `${fam}PE低估` : score < 55 ? `${fam}PE合理` : score < 75 ? `${fam}PE偏高` : score < 90 ? `${fam}PE高估` : `${fam}PE严重高估`;
+      const fam = peFamily === 'spx' ? '标普' : peFamily === 'cdl' ? '长电PE历史' : '纳指100';
+      return score < 30 ? `${fam}低估` : score < 55 ? `${fam}合理` : score < 75 ? `${fam}偏高` : score < 90 ? `${fam}高估` : `${fam}严重高估`;
     }
     if (key === 'cape') return score < 30 ? 'CAPE低估' : score < 55 ? 'CAPE合理' : score < 75 ? 'CAPE偏高' : score < 90 ? 'CAPE高估' : 'CAPE历史极值区';
     if (key === 'erp') return score < 30 ? '股票相对债券便宜' : score < 55 ? '股票相对债券中性' : score < 75 ? '股票相对债券偏贵' : '股票相对债券昂贵';
@@ -238,6 +257,7 @@ export class Analyzer {
     if (key === 'pe_pct_hist') return score < 30 ? 'PE历史低估' : score < 55 ? 'PE历史合理' : score < 75 ? 'PE历史偏高' : score < 90 ? 'PE历史高估' : 'PE历史极值区';
     if (key === 'pb_pct_hist') return score < 30 ? 'PB历史低估' : score < 55 ? 'PB历史合理' : score < 75 ? 'PB历史偏高' : score < 90 ? 'PB历史高估' : 'PB历史极值区';
     if (key === 'erp_hk') return score < 25 ? '港股ERP丰厚(极有吸引力)' : score < 50 ? '港股ERP偏正(有吸引力)' : score < 65 ? '港股ERP中性' : '港股ERP为负(债券占优)';
+    if (key === 'copper_pct') return score < 30 ? '铜价低位(周期底部)' : score < 55 ? '铜价中位' : score < 75 ? '铜价偏高' : '铜价历史高位(周期顶部风险)';
     if (key === 'div_yield_level') return score < 30 ? '股息率丰厚' : score < 50 ? '股息率正常偏低' : score < 70 ? '股息率偏低' : '股息率历史低位';
     if (key === 'dy_spread_cn') return score < 25 ? '股债利差丰厚(红利极有吸引力)' : score < 45 ? '股债利差偏正(红利有吸引力)' : score < 65 ? '股债利差中性' : '股债利差偏薄(债券占优)';
     if (key === 'stock_pb') return score < 30 ? 'PB处低位' : score < 55 ? 'PB偏低' : score < 75 ? 'PB中位' : score < 90 ? 'PB偏高' : 'PB历史高位';
@@ -305,8 +325,16 @@ export class Analyzer {
   }
 
   // 股债利差打分（股息率−中国10Y国债，中金红利策略核心框架）
-  // 参照系：2022上半年利差高位约2.3-3%，2026-11约2.45%处中性偏低区间（量化资配口径43%分位）
-  _dySpreadScore(v) {
+  // hongli参照系：2022上半年高位约2.3-3%，红利低波2026-11约2.9%
+  // cdl参照系：长电历史息差约1.0-2.2%，2026年约1.9-2.0%处历史高位（类债溢价）
+  _dySpreadScore(v, market = 'hongli') {
+    if (market === 'cdl') {
+      if (v >= 2.2) return 10;
+      if (v >= 1.8) return 10 + (2.2 - v) / 0.4 * 20;
+      if (v >= 1.4) return 30 + (1.8 - v) / 0.4 * 25;
+      if (v >= 1) return 55 + (1.4 - v) / 0.4 * 20;
+      return Math.min(92, 75 + (1 - v) * 20);
+    }
     if (v >= 3) return 10;
     if (v >= 2.5) return 10 + (3 - v) / 0.5 * 15;
     if (v >= 2) return 25 + (2.5 - v) / 0.5 * 20;
@@ -377,7 +405,7 @@ export class Analyzer {
       pe_composite: 'PE综合估值', cape: 'CAPE周期调整市盈率', erp: '股权风险溢价ERP', ma200_risk: '200日趋势风控',
       real_yield: '10年TIPS实际利率', gold_real_pct: '黄金实际价格分位', dxy_pct: '美元指数5年分位',
       pe_pct_hist: 'PE历史分位', pb_pct_hist: 'PB历史分位', erp_hk: '港股ERP', div_yield_level: '股息率水平',
-      dy_spread_cn: '股债利差', stock_pb: '个股PB水平',
+      dy_spread_cn: '股债利差', stock_pb: '个股PB水平', copper_pct: '铜价10年分位',
     };
     return names[k] || k;
   }
@@ -411,7 +439,8 @@ export class Analyzer {
       erp_hk: { name: '港股ERP', desc: '盈利收益率−美债10Y（港币联系汇率下美债即港股无风险利率），中金口径' },
       div_yield_level: { name: '股息率水平', desc: '指数股息率相对其历史区间的位置，越高越便宜' },
       dy_spread_cn: { name: '股债利差', desc: '股息率−中国10Y国债（中金红利策略核心标尺，国债用静态锚点季度校准），越高红利越便宜' },
-      stock_pb: { name: '个股PB水平', desc: '个股市净率在A股银行历史区间(0.45-1.4)中的位置——银行股估值主锚（中金PB-ROE框架）' },
+      stock_pb: { name: '个股PB水平', desc: '个股市净率在其历史区间锚点表中的位置——银行/水电/周期股的估值主锚' },
+      copper_pct: { name: '铜价10年分位', desc: 'COMEX铜价10年周线分位——周期股的周期位置锚，高分=周期顶部风险（紫金PE是反向指标，不参与评分）' },
     };
     return infos[k] || { name: k, desc: '' };
   }

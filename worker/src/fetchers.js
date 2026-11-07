@@ -324,6 +324,19 @@ export class Fetcher {
     }
   }
 
+  // ========== 大宗商品价格历史分位（周期股的周期位置锚） ==========
+  async getCommodityPercentile(symbol, name) {
+    try {
+      const d = await fetchJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=10y&interval=1wk`);
+      const closes = (d.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []).filter(c => c != null);
+      if (closes.length < 150) return { value: null, source: name, updated_at: now() };
+      const cur = closes[closes.length - 1];
+      const pct = closes.filter(x => x <= cur).length / closes.length * 100;
+      return { value: round(pct, 1), current: round(cur), source: `${name} (10y周线)`, updated_at: now() };
+    } catch {}
+    return { value: null, source: name, updated_at: now() };
+  }
+
   // ========== 个股PB（东方财富，银行股估值主锚） ==========
   // 注: f167带×100缩放且字段口径不稳，用 价格(f43/100)÷每股净资产(f92) 自算，f167 兜底
   async getStockPB(symbol) {
