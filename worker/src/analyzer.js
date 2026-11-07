@@ -28,10 +28,10 @@ export class Analyzer {
     this.targets = [
       { id: 'qqq', name: 'QQQ 纳斯达克100 ETF', symbol: 'QQQ', type: '美国ETF', strategic: true, pe_family: 'ndx',
         indicators: ['pe_composite', 'cape', 'erp', 'ma200_risk'],
-        weights: { pe_composite: 0.45, cape: 0.25, erp: 0.15, ma200_risk: 0.15 }, pe_normal: 25 },
+        weights: { pe_composite: 0.50, cape: 0.15, erp: 0.15, ma200_risk: 0.20 }, pe_normal: 25 },
       { id: 'voo', name: 'VOO 标普500 ETF', symbol: 'VOO', type: '美国ETF', strategic: true, pe_family: 'spx',
         indicators: ['pe_composite', 'cape', 'erp', 'ma200_risk'],
-        weights: { pe_composite: 0.45, cape: 0.25, erp: 0.15, ma200_risk: 0.15 }, pe_normal: 22 },
+        weights: { pe_composite: 0.50, cape: 0.15, erp: 0.15, ma200_risk: 0.20 }, pe_normal: 22 },
       { id: 'gld', name: '黄金 GLD ETF', symbol: 'GLD', type: '商品ETF', strategic: true, tactical_fg: false,
         indicators: ['real_yield', 'gold_real_pct', 'dxy_pct', 'ma200_risk'],
         weights: { real_yield: 0.30, gold_real_pct: 0.25, dxy_pct: 0.20, ma200_risk: 0.25 }, pe_normal: null },
@@ -383,13 +383,16 @@ export class Analyzer {
   }
 
   _strategy(s) {
+    // 宽默认校准(2026-11-08)：1倍=默认区间(≤70)，0.5倍=明确偏贵(≤85)，2倍/3倍留给真实低估。
+    // 依据：十年定投最大财富杀手是恐慌性停投而非买贵5%（动作不对称性）；
+    // 分数分布按 CAPE降权后重校，Phase 3 历史回放后复核
     if (s == null) return { action: '等待数据', multiple: 0, description: '数据不足，请稍后刷新', color: '#6c757d', icon: '⏳' };
     if (s <= 10) return { action: 'ALL IN', multiple: 999, description: '市场极度低迷，历史性买入机会！', color: '#dc3545', icon: '🚀' };
     if (s <= 25) return { action: '3倍定投', multiple: 3, description: '市场明显低估，建议加大定投金额至3倍', color: '#fd7e14', icon: '📈' };
     if (s <= 40) return { action: '2倍定投', multiple: 2, description: '市场偏低估，建议增加定投金额至2倍', color: '#ffc107', icon: '📊' };
-    if (s <= 60) return { action: '1倍定投', multiple: 1, description: '市场估值正常，建议维持正常定投金额', color: '#28a745', icon: '✅' };
-    if (s <= 75) return { action: '0.5倍定投', multiple: 0.5, description: '市场偏贵，建议减少定投金额至0.5倍', color: '#ffc107', icon: '⚠️' };
-    if (s <= 90) return { action: '暂停定投', multiple: 0, description: '市场明显高估，建议暂停定投', color: '#fd7e14', icon: '🛑' };
+    if (s <= 70) return { action: '1倍定投', multiple: 1, description: '市场估值可接受，维持正常定投', color: '#28a745', icon: '✅' };
+    if (s <= 85) return { action: '0.5倍定投', multiple: 0.5, description: '市场明确偏贵，建议减少定投金额至0.5倍', color: '#ffc107', icon: '⚠️' };
+    if (s <= 95) return { action: '暂停定投', multiple: 0, description: '市场极端高估，建议暂停定投', color: '#fd7e14', icon: '🛑' };
     return { action: '减仓/卖出', multiple: -1, description: '市场极度高估，建议分批减仓', color: '#dc3545', icon: '🔴' };
   }
 
