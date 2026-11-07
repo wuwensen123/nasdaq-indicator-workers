@@ -9,6 +9,8 @@ const PE_PCT_NDX = [[10, 0], [15, 8], [20, 28], [25, 50], [27.7, 65], [30, 75], 
 const PE_PCT_SPX = [[10, 1], [12, 6], [14, 18], [15.5, 35], [17, 55], [19, 70], [21, 82], [23, 90], [25, 94], [28, 97], [32, 99]];
 // S&P CAPE：中位 ~17.5，2000 峰值 44.2，2021 峰值 38.6（multpl 口径）
 const CAPE_PCT = [[10, 1], [13, 8], [15, 20], [17.5, 48], [20, 62], [25, 78], [30, 90], [35, 96], [38.6, 98.5], [44, 99.5]];
+// 中国10年期国债收益率静态锚点（2026-11 中债约2.1-2.3%），股债利差用。中债API未开放免费接口，季度人工校准
+const CN10Y_ANCHOR = 2.2;
 
 export class Analyzer {
   constructor() {
@@ -25,10 +27,12 @@ export class Analyzer {
       { id: 'hsi', name: '恒生指数', symbol: '^HSI', type: '香港指数', strategic: true, tactical_fg: false, dj_index: '恒生指数', dy_source: 'danjuan', dy_map: 'hsi',
         indicators: ['pe_pct_hist', 'erp_hk', 'div_yield_level', 'ma200_risk'],
         weights: { pe_pct_hist: 0.30, erp_hk: 0.30, div_yield_level: 0.20, ma200_risk: 0.20 }, pe_normal: 12 },
-      { id: 'dividend_low_vol_etf', name: '红利低波ETF(512890)', symbol: '512890.SS', type: '中国ETF', indicators: ['rsi', 'ma200', 'pe_shanghai', 'pe_csi300', 'dividend_yield'],
-        weights: { rsi: 0.20, ma200: 0.20, pe_shanghai: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
-      { id: 'dividend_low_vol_100', name: '红利低波100(930955)', symbol: '000300.SS', type: '中国指数', indicators: ['rsi', 'ma200', 'pe_shanghai', 'pe_csi300', 'dividend_yield'],
-        weights: { rsi: 0.20, ma200: 0.20, pe_shanghai: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
+      { id: 'dividend_low_vol_etf', name: '红利低波ETF(512890)', symbol: '512890.SS', type: '中国ETF', strategic: true, tactical_fg: false, dj_index: '红利低波', dy_source: 'danjuan',
+        indicators: ['dy_spread_cn', 'pe_pct_hist', 'pb_pct_hist', 'ma200_risk'],
+        weights: { dy_spread_cn: 0.30, pe_pct_hist: 0.25, pb_pct_hist: 0.25, ma200_risk: 0.20 }, pe_normal: null },
+      { id: 'dividend_low_vol_100', name: '红利低波100(930955)', symbol: '000300.SS', type: '中国指数', strategic: true, tactical_fg: false, dj_index: '红利低波', dy_source: 'danjuan',
+        indicators: ['dy_spread_cn', 'pe_pct_hist', 'pb_pct_hist', 'ma200_risk'],
+        weights: { dy_spread_cn: 0.30, pe_pct_hist: 0.25, pb_pct_hist: 0.25, ma200_risk: 0.20 }, pe_normal: null },
       { id: 'abc_bank', name: '农业银行(601288)', symbol: '601288.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300', 'dividend_yield'],
         weights: { rsi: 0.20, ma200: 0.20, pe_stock: 0.20, pe_csi300: 0.15, dividend_yield: 0.25 }, pe_normal: null },
       { id: 'ccb_bank', name: '建设银行(601939)', symbol: '601939.SS', type: '中国银行股', indicators: ['rsi', 'ma200', 'pe_stock', 'pe_csi300', 'dividend_yield'],
@@ -193,6 +197,13 @@ export class Analyzer {
       const v = cfg.dy_source === 'danjuan' ? (global.danjuan?.map?.[cfg.dj_index]?.dy ?? null) : (td.dividend_yield ?? null);
       return { value: v, score: v != null ? round(this._divYieldScore(v, cfg.dy_map || 'a_share')) : null, unit: '%' };
     }
+    if (key === 'dy_spread_cn') {
+      // 股债利差：股息率 − 中国10Y国债（中金红利策略核心标尺）
+      const dy = cfg.dy_source === 'danjuan' ? (global.danjuan?.map?.[cfg.dj_index]?.dy ?? null) : (td.dividend_yield ?? null);
+      if (dy == null) return { value: null, score: null, unit: '%' };
+      const v = round(dy - CN10Y_ANCHOR, 2);
+      return { value: v, score: round(this._dySpreadScore(v)), unit: '%' };
+    }
     return { value: null, score: null };
   }
 
@@ -218,6 +229,7 @@ export class Analyzer {
     if (key === 'pb_pct_hist') return score < 30 ? 'PB历史低估' : score < 55 ? 'PB历史合理' : score < 75 ? 'PB历史偏高' : score < 90 ? 'PB历史高估' : 'PB历史极值区';
     if (key === 'erp_hk') return score < 25 ? '港股ERP丰厚(极有吸引力)' : score < 50 ? '港股ERP偏正(有吸引力)' : score < 65 ? '港股ERP中性' : '港股ERP为负(债券占优)';
     if (key === 'div_yield_level') return score < 30 ? '股息率丰厚' : score < 50 ? '股息率正常偏低' : score < 70 ? '股息率偏低' : '股息率历史低位';
+    if (key === 'dy_spread_cn') return score < 25 ? '股债利差丰厚(红利极有吸引力)' : score < 45 ? '股债利差偏正(红利有吸引力)' : score < 65 ? '股债利差中性' : '股债利差偏薄(债券占优)';
     return 'N/A';
   }
 
@@ -279,6 +291,17 @@ export class Analyzer {
     if (v >= 3) return 35 + (4 - v) * 20;
     if (v >= 2) return 55 + (3 - v) * 20;
     return Math.min(92, 75 + (2 - v) * 8);
+  }
+
+  // 股债利差打分（股息率−中国10Y国债，中金红利策略核心框架）
+  // 参照系：2022上半年利差高位约2.3-3%，2026-11约2.45%处中性偏低区间（量化资配口径43%分位）
+  _dySpreadScore(v) {
+    if (v >= 3) return 10;
+    if (v >= 2.5) return 10 + (3 - v) / 0.5 * 15;
+    if (v >= 2) return 25 + (2.5 - v) / 0.5 * 20;
+    if (v >= 1.5) return 45 + (2 - v) / 0.5 * 20;
+    if (v >= 1) return 65 + (1.5 - v) / 0.5 * 15;
+    return Math.min(95, 80 + (1 - v) * 15);
   }
 
   // MA200风控打分（Faber方向）：线上越远越安全 → 低分；水下越深回撤风险越高 → 高分
@@ -343,6 +366,7 @@ export class Analyzer {
       pe_composite: 'PE综合估值', cape: 'CAPE周期调整市盈率', erp: '股权风险溢价ERP', ma200_risk: '200日趋势风控',
       real_yield: '10年TIPS实际利率', gold_real_pct: '黄金实际价格分位', dxy_pct: '美元指数5年分位',
       pe_pct_hist: 'PE历史分位', pb_pct_hist: 'PB历史分位', erp_hk: '港股ERP', div_yield_level: '股息率水平',
+      dy_spread_cn: '股债利差',
     };
     return names[k] || k;
   }
@@ -375,6 +399,7 @@ export class Analyzer {
       pb_pct_hist: { name: 'PB历史分位', desc: '市净率近10年历史分位（蛋卷基金口径）' },
       erp_hk: { name: '港股ERP', desc: '盈利收益率−美债10Y（港币联系汇率下美债即港股无风险利率），中金口径' },
       div_yield_level: { name: '股息率水平', desc: '指数股息率相对其历史区间的位置，越高越便宜' },
+      dy_spread_cn: { name: '股债利差', desc: '股息率−中国10Y国债（中金红利策略核心标尺，国债用静态锚点季度校准），越高红利越便宜' },
     };
     return infos[k] || { name: k, desc: '' };
   }
