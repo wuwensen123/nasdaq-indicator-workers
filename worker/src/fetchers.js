@@ -139,16 +139,27 @@ export class Fetcher {
       const pc = d?.data?.put_call_ratio;
       if (pc != null && pc > 0.1 && pc < 5) return { value: round(pc), label: this._pcLabel(pc), source: 'CBOE', updated_at: now() };
     } catch {}
-    // 从 Yahoo Finance SPY 期权数据估算
+    // 从 Nasdaq 获取 SPY 期权成交量比率（最近到期日，真实数据）
     try {
-      const d = await fetchJSON('https://query2.finance.yahoo.com/v7/finance/options/SPY?formatted=true&lang=en-US&region=US');
-      const opt = d?.optionChain?.result?.[0]?.options?.[0];
-      if (opt) {
-        const calls = (opt.calls || []).reduce((s, c) => s + (c.volume || 0), 0);
-        const puts = (opt.puts || []).reduce((s, p) => s + (p.volume || 0), 0);
-        if (calls > 100 && puts > 100) {
-          const ratio = puts / calls;
-          if (ratio > 0.1 && ratio < 5) return { value: round(ratio), label: this._pcLabel(ratio), source: 'SPY期权估算', updated_at: now() };
+      const NH = { 'User-Agent': UA, 'Accept': 'application/json, text/plain, */*', 'Accept-Language': 'en-US,en;q=0.9', 'Origin': 'https://www.nasdaq.com', 'Referer': 'https://www.nasdaq.com/' };
+      const listRes = await fetch('https://api.nasdaq.com/api/quote/SPY/option-chain?assetclass=etf&limit=3', { headers: NH });
+      if (listRes.ok) {
+        const list = await listRes.json();
+        const eg = list?.data?.table?.rows?.[0]?.expirygroup; // 如 "November 9, 2026"
+        const ed = eg ? new Date(eg).toISOString().slice(0, 10) : null;
+        if (ed) {
+          const chainRes = await fetch('https://api.nasdaq.com/api/quote/SPY/option-chain?assetclass=etf&date=' + ed + '&limit=250', { headers: NH });
+          if (chainRes.ok) {
+            const chain = await chainRes.json();
+            const rows = chain?.data?.table?.rows || [];
+            const vol = x => { if (x == null) return 0; if (typeof x === 'object') x = x.value; const n = parseInt(String(x).replace(/,/g, '')); return isNaN(n) ? 0 : n; };
+            const calls = rows.reduce((s, r) => s + vol(r.c_Volume), 0);
+            const puts = rows.reduce((s, r) => s + vol(r.p_Volume), 0);
+            if (calls > 100 && puts > 100) {
+              const ratio = puts / calls;
+              if (ratio > 0.1 && ratio < 5) return { value: round(ratio), label: this._pcLabel(ratio), source: 'SPY期权(Nasdaq)', updated_at: now() };
+            }
+          }
         }
       }
     } catch {}
