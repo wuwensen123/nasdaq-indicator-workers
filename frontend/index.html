@@ -191,18 +191,17 @@
                         <div class="formula-text" id="formulaText">综合评分 = 各指标评分 × 权重的加权平均</div>
                         <div class="formula-detail mt-2">
                             <strong>评分范围：</strong>0-100分<br>
-                            <strong>0分</strong> = 强烈买入信号（市场极度恐慌/低估）<br>
+                            <strong>0分</strong> = 便宜/低估<br>
                             <strong>50分</strong> = 中性（估值合理）<br>
-                            <strong>100分</strong> = 强烈卖出信号（市场极度贪婪/高估）<br>
+                            <strong>100分</strong> = 贵/高估<br>
                             <br>
-                            <strong>定投策略：</strong><br>
-                            • 0-10分：ALL IN - 历史性买入机会<br>
-                            • 10-25分：3倍定投 - 市场明显低估<br>
-                            • 25-40分：2倍定投 - 市场偏低估<br>
-                            • 40-60分：1倍定投 - 正常定投<br>
-                            • 60-75分：0.5倍定投 - 市场偏贵，减少投入<br>
-                            • 75-90分：暂停定投 - 观望为主<br>
-                            • 90-100分：减仓/卖出 - 锁定利润
+                            <strong>定投倍数（1x底仓 + 加速，不暂停、不减仓）：</strong><br>
+                            • 综合评分≤40 或 PE分位≤40% 或 回撤≥15%：1.5倍<br>
+                            • 综合评分≤30 或 PE分位≤25% 或 回撤≥25%：2倍<br>
+                            • 综合评分≤15 或 PE分位≤15% 或 回撤≥35%：3倍<br>
+                            • 其余情况：1倍底仓<br>
+                            • 估值极端高位（股票PE分位/银行PB分位/商品实际价格分位≥85%）时，回撤不加速<br>
+                            • 恐惧贪婪极端时仅做±25%微调，不改变底仓
                         </div>
                     </div>
                     <div class="mt-3" id="detailFormula"></div>
@@ -242,8 +241,15 @@ function getScoreTextColor(score) {
     return '#ff6b6b';
 }
 function getStrategyColor(action) {
-    const colors = { 'ALL IN': '#dc3545', '3倍定投': '#fd7e14', '2倍定投': '#ffc107', '1倍定投': '#28a745', '0.5倍定投': '#ffc107', '暂停定投': '#fd7e14', '减仓/卖出': '#dc3545' };
-    return colors[action] || '#6c757d';
+    const colors = { '3倍定投': '#fd7e14', '2倍定投': '#ffc107', '1.5倍定投': '#ffc107', '1倍定投': '#28a745' };
+    if (colors[action]) return colors[action];
+    const m = parseFloat(action);
+    if (!isNaN(m)) {
+        if (m >= 2) return '#fd7e14';
+        if (m >= 1) return '#28a745';
+        if (m > 0) return '#ffc107';
+    }
+    return '#6c757d';
 }
 function formatNumber(num, decimals = 2) { if (num === null || num === undefined) return '--'; if (typeof num === 'string') return num; return num.toFixed(decimals); }
 function formatTime(timeStr) { return timeStr || '--'; }

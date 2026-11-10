@@ -343,18 +343,22 @@ export class Fetcher {
     try {
       const code = symbol.replace('.SS', '').replace('.SZ', '');
       const market = symbol.endsWith('.SS') ? '1' : '0';
-      const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${market}.${code}&fields=f43,f92,f167`;
+      // f162=动态PE（×100），f167=PB（兜底）；一次请求同时拿到 PB 与 PE，供 PB-ROE/派息率使用
+      const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${market}.${code}&fields=f43,f92,f162,f167`;
       const d = await fetchJSON(url);
       const data = d?.data || {};
       let pb = null;
       if (data.f92 > 0 && data.f43 > 0) pb = (data.f43 / 100) / data.f92;
       if (pb == null && data.f167 != null) pb = data.f167 > 15 ? data.f167 / 100 : data.f167;
-      if (pb != null && pb > 0.1 && pb < 30) return { value: round(pb, 2), source: '东方财富', updated_at: now() };
+      let pe = data.f162 != null ? data.f162 / 100 : null;
+      if (!(pe > 0 && pe < 200)) pe = null;
+      if (pb != null && pb > 0.1 && pb < 30) return { value: round(pb, 2), pe: pe != null ? round(pe) : null, source: '东方财富', updated_at: now() };
       console.error('PB取值异常', symbol, JSON.stringify(data).slice(0, 120));
+      if (pe != null) return { value: null, pe, source: '东方财富', updated_at: now() };
     } catch (e) {
       console.error('PB请求失败', symbol, String(e?.message || e).slice(0, 80));
     }
-    return { value: null, source: '东方财富', updated_at: now() };
+    return { value: null, pe: null, source: '东方财富', updated_at: now() };
   }
 
     // ========== PE Ratio ==========
@@ -403,8 +407,10 @@ export class Fetcher {
       const quotes = d.chart?.result?.[0];
       if (!quotes) return result;
       const close = quotes.indicators?.quote?.[0]?.close?.filter(c => c != null) || [];
-      if (close.length < 50) return result;
+      if (!close.length) return result;
+      // 先取最新价：部分指数（如930955）Yahoo只有单点报价、没有历史K线
       result.current_price = round(close[close.length - 1]);
+      if (close.length < 50) return result;
 
       // RSI(14)
       result.rsi = round(calcRSI(close, 14));

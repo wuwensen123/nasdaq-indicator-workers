@@ -135,13 +135,21 @@ async function fetchFreshData() {
   for (let i = 0; i < targets.length; i++) {
     targetsData[targets[i].id] = {
       name: targets[i].name, symbol: targets[i].symbol,
-      pe_ratio: peMap[targets[i].id]?.value ?? null, pe_data: peMap[targets[i].id] ?? null,
+      // 中国个股的 PE 由东财 PB 请求顺带返回（f162），避免额外 Yahoo crumb 子请求
+      pe_ratio: peMap[targets[i].id]?.value ?? pbResults[i]?.pe ?? null,
+      pe_data: peMap[targets[i].id] ?? (pbResults[i]?.pe != null ? { value: pbResults[i].pe, source: '东方财富' } : null),
+      stock_pe: pbResults[i]?.pe ?? null,
       dividend_yield: divResults[i].value, pb: pbResults[i].value,
     };
   }
 
   for (const t of targets) {
-    const tech = await fetcher.getTechnicalIndicators(t.symbol);
+    let tech = await fetcher.getTechnicalIndicators(t.symbol);
+    if (t.tech_symbol && t.tech_symbol !== t.symbol) {
+      // 某些指数（如930955）Yahoo只有最新点位、没有历史K线：用跟踪同一指数的ETF补MA200/回撤
+      const proxy = await fetcher.getTechnicalIndicators(t.tech_symbol);
+      tech = { ...proxy, current_price: tech.current_price ?? proxy.current_price, source: `${tech.source} / 技术代理 ${t.tech_symbol}` };
+    }
     targetsData[t.id].current_price = tech.current_price;
     targetsData[t.id].technical = tech;
   }
