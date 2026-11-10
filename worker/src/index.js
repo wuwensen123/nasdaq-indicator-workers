@@ -95,13 +95,16 @@ async function fetchFreshData() {
   const start = Date.now();
   const targets = analyzer.getTargets();
 
-  const [vix, fearGreed, treasury, putCall, dxy, shillerPE, realYield, goldRealPct, dxyPct, copperPct, danjuan] = await Promise.all([
+  const [vix, fearGreed, treasury, putCall, dxy, shillerPE, realYield, goldRealPct, dxyPct, copperPct, danjuan, jiuquan, csiH30269, csi930955] = await Promise.all([
     fetcher.getVIX(), fetcher.getFearGreed(), fetcher.getTreasuryYield(),
     fetcher.getPutCallRatio(), fetcher.getDXY(), fetcher.getShillerPE(),
     fetcher.getRealYield10Y(),
     fetcher.getGoldRealPricePercentile(), fetcher.getDXYPercentile(),
     fetcher.getCommodityPercentile('HG=F', 'COMEX铜'),
     fetcher.getDanjuanValuations(),
+    fetcher.getJiuquanValuations(),
+    fetcher.getCSIIndexValuation('H30269'),
+    fetcher.getCSIIndexValuation('930955'),
   ]);
 
   const globalData = {
@@ -112,6 +115,9 @@ async function fetchFreshData() {
     real_yield_10y: realYield, gold_real_pct: goldRealPct, dxy_pct: dxyPct,
     copper_pct: copperPct,
     danjuan: { map: danjuan.map, source: danjuan.source, updated_at: danjuan.updated_at },
+    jiuquan: { map: jiuquan.map, source: jiuquan.source, updated_at: jiuquan.updated_at },
+    // 中证官方每日估值：红利低波(H30269) / 红利低波100(930955) 各自独立，不用蛋卷代理
+    csi: { H30269: csiH30269, '930955': csi930955 },
     updated_at: new Date().toISOString(),
   };
 

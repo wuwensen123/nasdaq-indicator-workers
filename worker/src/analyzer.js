@@ -42,15 +42,16 @@ export class Analyzer {
         indicators: ['pe_pct_hist', 'erp_hk', 'div_yield_level', 'ma200_risk'],
         weights: { pe_pct_hist: 0.35, erp_hk: 0.30, div_yield_level: 0.15, ma200_risk: 0.20 }, pe_normal: 12,
         method_note: '港股高息但股息率只作15%的carry交叉验证，主权重给PE分位与港股ERP' },
-      { id: 'dividend_low_vol_etf', name: '红利低波ETF(512890)', symbol: '512890.SS', type: '中国ETF', strategic: true, tactical_fg: false, dj_index: '红利低波', dy_source: 'danjuan', pb_roe_fair_pe: 10,
+      { id: 'dividend_low_vol_etf', name: '红利低波ETF(512890)', symbol: '512890.SS', type: '中国ETF', strategic: true, tactical_fg: false, dj_index: '红利低波', jq_code: 'h30269.CSI', csi_code: 'H30269', dy_source: 'danjuan', pb_roe_fair_pe: 10,
         indicators: ['pe_pct_hist', 'pb_pct_hist', 'roe_level', 'payout_ratio', 'dy_carry', 'ma200_risk'],
         weights: { pe_pct_hist: 0.25, pb_pct_hist: 0.10, roe_level: 0.20, payout_ratio: 0.15, dy_carry: 0.20, ma200_risk: 0.10 }, pe_normal: null,
-        method_note: '股息率是红利策略的收益来源而非估值信号：指标显示实际股息率，按股息率−中国10Y国债作carry评分(20%)；ROE(PB/PE)与派息率(股息率×PE)价格中性，负责质量与可持续性；派息率>75%时高息不加分' },
-      { id: 'dividend_low_vol_100', name: '红利低波100(930955)', symbol: '930955.SS', tech_symbol: '563020.SS', type: '中国指数', strategic: true, tactical_fg: false, dj_index: '红利低波', dy_source: 'danjuan', pb_roe_fair_pe: 10,
+        method_note: '股息率用中证官方D/P2（收益来源，非估值信号），carry=股息率−中国10Y国债；ROE/派息率价格中性；PE/PB分位与ROE用韭圈儿H30269加权序列（10年）；派息率>75%时高息不加分',
+        data_note: '多源校验：蛋卷同日PE/PB及分位与韭圈儿一致；官方指数单张(2026-10-30) PB 0.783、ROE≈9.05%；股息率差异来自D/P口径（蛋卷4.66%≈官方D/P1，评分用官方D/P2）' },
+      { id: 'dividend_low_vol_100', name: '红利低波100(930955)', symbol: '930955.SS', tech_symbol: '563020.SS', type: '中国指数', strategic: true, tactical_fg: false, jq_code: '930955.CSI', csi_code: '930955', dy_source: 'danjuan', pb_roe_fair_pe: 10,
         indicators: ['pe_pct_hist', 'pb_pct_hist', 'roe_level', 'payout_ratio', 'dy_carry', 'ma200_risk'],
         weights: { pe_pct_hist: 0.25, pb_pct_hist: 0.10, roe_level: 0.20, payout_ratio: 0.15, dy_carry: 0.20, ma200_risk: 0.10 }, pe_normal: null,
-        method_note: '同红利低波ETF：股息率作为carry参与评分(20%)，ROE/派息率负责质量与防高息陷阱',
-        data_note: '蛋卷无930955独立估值，PE/PB分位借用同因子「红利低波」指数代理；Yahoo无930955历史K线，MA200/回撤用跟踪同一指数的563020 ETF代理' },
+        method_note: '930955独立数据：股息率用中证官方D/P2，PE/PB分位与ROE用韭圈儿930955加权序列（2017年上市以来）；不再借用红利低波代理；ROE/派息率负责质量与防高息陷阱',
+        data_note: '多源校验：Wind/华福(2026-11-05) PE 9.54/PB 0.90/股息率4.58%/5年PE分位95.5%，与韭圈儿方向一致；官方指数单张(2026-10-30) PB 0.793、ROE≈8.61%；Yahoo无930955历史K线，MA200/回撤用563020 ETF代理' },
       { id: 'abc_bank', name: '农业银行(601288)', symbol: '601288.SS', type: '中国银行股', strategic: true, tactical_fg: false, dj_index: '中证银行', dy_source: 'td', dy_map: 'bank', pb_roe_fair_pe: 8, accel_rich: 'pb',
         indicators: ['div_yield_level', 'pb_pct_hist', 'stock_pb', 'roe_level', 'payout_ratio', 'ma200_risk'],
         weights: { div_yield_level: 0.15, pb_pct_hist: 0.15, stock_pb: 0.20, roe_level: 0.20, payout_ratio: 0.15, ma200_risk: 0.15 }, pe_normal: null,
@@ -153,7 +154,9 @@ export class Analyzer {
     }
     let weightedSum = 0, totalWeight = 0;
     for (const r of indicators) if (r.score != null) { weightedSum += r.score * r.weight; totalWeight += r.weight; }
-    const composite = totalWeight > 0 ? round(weightedSum / totalWeight) : null;
+    // 数据覆盖不足一半时不给综合评分：避免单一数据源故障（如估值源断供）时
+    // 仅凭趋势指标就触发加速定投
+    const composite = totalWeight >= 0.5 ? round(weightedSum / totalWeight) : null;
 
     const pos = this._marketPosition(composite);
     const accel = this._accelSignals(cfg, td, global);
@@ -165,13 +168,42 @@ export class Analyzer {
     const strategy = this._applyTactical(base, coeff, reason);
 
     const fw = (k) => `${this._indName(k)}×${w[k] * 100}%`;
+    const srcNote = this._valuationNote(cfg, global);
     return {
       target_id: cfg.id, target_name: cfg.name, target_type: cfg.type, symbol: cfg.symbol,
       current_price: td.current_price, composite_score: composite, market_position: pos.label,
       position_color: pos.color, strategy, indicators,
       formula: `战略评分 = ${cfg.indicators.map(fw).join(' + ')}｜倍数 = 1x底仓 + 估值/回撤加速${cfg.tactical_fg !== false ? `${coeff !== 1 ? ` × 情绪${coeff}` : ''}` : '（无情绪叠加）'}`,
-      formula_detail: `十年定投双层架构：评分0=便宜→100=贵（估值/分位项≈历史分位）；定投倍数以1x为底仓，仅在综合评分≤40、PE分位≤40%或距52周高点回撤≥15%时加速（1.5x/2x/3x）；估值极端高位时回撤不加速（股票PE分位/银行PB分位/商品实际价格分位≥85%）；不暂停、不减仓，1x底仓不因贪婪减速。依据：Vanguard定投现金拖累、AQR Market Timing Sin a Little、Faber均线风控${cfg.method_note ? `｜${cfg.method_note}` : ''}${cfg.data_note ? `｜${cfg.data_note}` : ''}`,
+      formula_detail: `十年定投双层架构：评分0=便宜→100=贵（估值/分位项≈历史分位）；定投倍数以1x为底仓，仅在综合评分≤40、PE分位≤40%或距52周高点回撤≥15%时加速（1.5x/2x/3x）；估值极端高位时回撤不加速（股票PE分位/银行PB分位/商品实际价格分位≥85%）；不暂停、不减仓，1x底仓不因贪婪减速。依据：Vanguard定投现金拖累、AQR Market Timing Sin a Little、Faber均线风控${cfg.method_note ? `｜${cfg.method_note}` : ''}${cfg.data_note ? `｜${cfg.data_note}` : ''}${srcNote ? `｜${srcNote}` : ''}`,
     };
+  }
+
+  // 韭圈儿独立指数估值（PE/PB/股息率/分位/ROE）；无配置时返回 null
+  _jq(cfg, global) {
+    return cfg.jq_code ? (global.jiuquan?.map?.[cfg.jq_code] ?? null) : null;
+  }
+
+  // 中证官方每日估值（P/E2、D/P2）；无配置时返回 null
+  _csi(cfg, global) {
+    return cfg.csi_code ? (global.csi?.[cfg.csi_code] ?? null) : null;
+  }
+
+  // 弹窗内的实时数据源说明（避免把每日数值写死在配置里而隔天失真）
+  _valuationNote(cfg, global) {
+    if (!cfg.jq_code && !cfg.csi_code) return '';
+    const csi = this._csi(cfg, global);
+    const jq = this._jq(cfg, global);
+    const parts = [];
+    if (csi?.error) parts.push(`中证官方数据错误(${csi.error})`);
+    else if (csi && (csi.pe2 != null || csi.dy2 != null)) {
+      parts.push(`中证官方${csi.date ? ` ${csi.date}` : ''}：P/E2 ${csi.pe2 ?? '--'}、D/P2 ${csi.dy2 ?? '--'}%`);
+    }
+    if (jq) {
+      // 930955 发布于2017-05-26，分位实际为上市以来而非完整10年，避免误导
+      const pctWord = jq.insufficient ? '上市以来分位' : '10年分位';
+      parts.push(`韭圈儿${jq.date ? ` ${jq.date}` : ''}：PE ${jq.pe ?? '--'}、PB ${jq.pb ?? '--'}、PE${pctWord} ${jq.pe_pct ?? '--'}%、PB${pctWord} ${jq.pb_pct ?? '--'}%、ROE ${jq.roe ?? '--'}%`);
+    }
+    return parts.length ? `实时数据源：${parts.join('；')}` : '';
   }
 
   // 各战略指标取值+打分（0=强烈买入 → 100=强烈卖出）
@@ -217,6 +249,8 @@ export class Analyzer {
       return { value: v, score: v };
     }
     if (key === 'pe_pct_hist') {
+      const jq = this._jq(cfg, global);
+      if (jq) return { value: jq.pe ?? null, score: jq.pe_pct ?? null };
       const dj = global.danjuan?.map?.[cfg.dj_index];
       return { value: dj?.pe ?? null, score: dj?.pe_pct ?? null };
     }
@@ -231,6 +265,8 @@ export class Analyzer {
       return { value: v, score: v };
     }
     if (key === 'pb_pct_hist') {
+      const jq = this._jq(cfg, global);
+      if (jq) return { value: jq.pb ?? null, score: jq.pb_pct ?? null };
       const dj = global.danjuan?.map?.[cfg.dj_index];
       return { value: dj?.pb ?? null, score: dj?.pb_pct ?? null };
     }
@@ -256,15 +292,18 @@ export class Analyzer {
     }
     if (key === 'dy_carry') {
       // 股息率是红利策略的收益来源（carry），不是估值信号：
-      // 指标值显示实际股息率，评分用“股息率−中国10Y国债”；派息率>75%触发高息陷阱保护
+      // 优先用中证官方D/P2（权威、两指数各自独立），其次韭圈儿，最后蛋卷/个股兜底；
+      // 评分用“股息率−中国10Y国债”；派息率>75%触发高息陷阱保护
+      const csi = this._csi(cfg, global);
+      const jq = this._jq(cfg, global);
       const dj = cfg.dj_index ? global.danjuan?.map?.[cfg.dj_index] : null;
-      const dy = cfg.dy_source === 'danjuan' ? (dj?.dy ?? null)
+      const dy = csi?.dy2 ?? jq?.dy ?? (cfg.dy_source === 'danjuan' ? (dj?.dy ?? null)
         : cfg.dy_source === 'anchor' ? cfg.dy_anchor
-        : (td.dividend_yield ?? null);
+        : (td.dividend_yield ?? null));
       if (dy == null) return { value: null, score: null, unit: '%' };
-      const pe = cfg.dy_source === 'danjuan' ? (dj?.pe ?? null)
+      const pe = csi?.pe2 ?? jq?.pe ?? (cfg.dy_source === 'danjuan' ? (dj?.pe ?? null)
         : cfg.dy_source === 'anchor' ? (td.pe_ratio ?? dj?.pe ?? null)
-        : (td.stock_pe ?? td.pe_ratio ?? dj?.pe ?? null);
+        : (td.stock_pe ?? td.pe_ratio ?? dj?.pe ?? null));
       const payout = pe != null && pe > 0 ? dy * pe : null;
       let score = this._dySpreadScore(round(dy - CN10Y_ANCHOR, 2), 'hongli');
       let family = null;
@@ -273,6 +312,12 @@ export class Analyzer {
     }
     if (key === 'roe_level') {
       // ROE = PB/PE（价格中性：E/B，不随股价漂移）；用 PB-ROE 合理值做质量调整后的估值
+      const jq = this._jq(cfg, global);
+      if (jq && jq.roe != null && jq.pb != null) {
+        const fairPe = cfg.pb_roe_fair_pe ?? (cfg.type.includes('银行') ? 8 : cfg.type.includes('电力') ? 20 : 10);
+        const score = this._pbRoeScore(jq.pb, jq.roe, fairPe);
+        return { value: jq.roe, score: score == null ? null : round(score), unit: '%' };
+      }
       const dj = cfg.dj_index ? global.danjuan?.map?.[cfg.dj_index] : null;
       // 个股优先用东财同一请求的 PE/PB（口径一致）；指数退到蛋卷，避免个股PB混指数PE
       const hasStockPB = td.pb != null;
@@ -286,12 +331,18 @@ export class Analyzer {
     }
     if (key === 'payout_ratio') {
       // 派息率 = 股息率 × PE（价格中性：D/E）；只检验分红可持续性，不把高股息当便宜
+      // 优先同一官方口径的 D/P2 与 P/E2，避免收益率与PE来自不同口径
+      const csi = this._csi(cfg, global);
+      const jq = this._jq(cfg, global);
       const dj = cfg.dj_index ? global.danjuan?.map?.[cfg.dj_index] : null;
-      let dy = null, pe = null;
-      if (cfg.dy_source === 'danjuan') { dy = dj?.dy ?? null; pe = dj?.pe ?? null; }
-      else if (cfg.dy_source === 'anchor') { dy = cfg.dy_anchor ?? null; pe = td.pe_ratio ?? dj?.pe ?? null; }
-      else if (td.dividend_yield != null) { dy = td.dividend_yield; pe = td.stock_pe ?? td.pe_ratio ?? dj?.pe ?? null; }
-      else { dy = dj?.dy ?? null; pe = dj?.pe ?? null; }
+      let dy = csi?.dy2 ?? jq?.dy ?? null;
+      let pe = csi?.pe2 ?? jq?.pe ?? null;
+      if (dy == null || pe == null || pe <= 0) {
+        if (cfg.dy_source === 'danjuan') { dy = dj?.dy ?? null; pe = dj?.pe ?? null; }
+        else if (cfg.dy_source === 'anchor') { dy = cfg.dy_anchor ?? null; pe = td.pe_ratio ?? dj?.pe ?? null; }
+        else if (td.dividend_yield != null) { dy = td.dividend_yield; pe = td.stock_pe ?? td.pe_ratio ?? dj?.pe ?? null; }
+        else { dy = dj?.dy ?? null; pe = dj?.pe ?? null; }
+      }
       if (dy == null || pe == null || pe <= 0) return { value: null, score: null, unit: '%' };
       const v = round(dy * pe, 1);
       return { value: v, score: round(this._payoutScore(v)), unit: '%' };
@@ -489,7 +540,8 @@ export class Analyzer {
       if (cfg.indicators.includes('gold_real_pct')) vals.push(global.gold_real_pct?.value);
       rich = vals.some(v => v != null && v >= 85);
     } else if (cfg.accel_rich === 'pb') {
-      const pbPct = cfg.dj_index ? global.danjuan?.map?.[cfg.dj_index]?.pb_pct : null;
+      const jqPb = this._jq(cfg, global)?.pb_pct;
+      const pbPct = jqPb != null ? jqPb : (cfg.dj_index ? global.danjuan?.map?.[cfg.dj_index]?.pb_pct : null);
       rich = pbPct != null && pbPct >= 85;
     } else {
       rich = pePct != null && pePct >= 85;
@@ -502,6 +554,8 @@ export class Analyzer {
   }
 
   _targetPePercentile(cfg, td, global) {
+    const jq = this._jq(cfg, global);
+    if (jq?.pe_pct != null) return jq.pe_pct;
     const dj = cfg.dj_index ? global.danjuan?.map?.[cfg.dj_index] : null;
     if (dj?.pe_pct != null) return dj.pe_pct;
     if (cfg.indicators.includes('pe_composite') && td.pe_ratio != null) {
@@ -631,12 +685,12 @@ export class Analyzer {
       real_yield: { name: '10年TIPS实际利率', desc: '无现金流/长久期资产的机会成本（FRED DFII10）；实际利率越高，黄金与成长股估值压力越大' },
       gold_real_pct: { name: '黄金实际价格分位', desc: '金价÷CPI后的50年历史分位——无现金流资产的长周期估值锚' },
       dxy_pct: { name: '美元指数5年分位', desc: '美元越强，以美元计价的黄金越承压（反向驱动）' },
-      pe_pct_hist: { name: 'PE历史分位', desc: '指数市盈率近10年历史分位（蛋卷基金口径），估值主锚' },
-      pb_pct_hist: { name: 'PB历史分位', desc: '市净率近10年历史分位（蛋卷基金口径）' },
+      pe_pct_hist: { name: 'PE历史分位', desc: '指数市盈率历史分位（韭圈儿/蛋卷基金口径，10年或上市以来），估值主锚' },
+      pb_pct_hist: { name: 'PB历史分位', desc: '市净率历史分位（韭圈儿/蛋卷基金口径，10年或上市以来）' },
       erp_hk: { name: '港股ERP', desc: '盈利收益率−美债10Y（港币联系汇率下美债即港股无风险利率），中金口径' },
       div_yield_level: { name: '股息率水平', desc: '股息率相对其历史区间的位置；仅作carry交叉验证，单一高股息可能是陷阱（Morgan Stanley）' },
       dy_spread_cn: { name: '股债利差', desc: '股息率−中国10Y国债（中金红利策略核心标尺，国债用静态锚点季度校准），越高红利越便宜' },
-      dy_carry: { name: '股息率(股债利差)', desc: '红利策略的收益来源：显示实际股息率，按股息率−中国10Y国债评分；派息率>75%时触发高息陷阱保护，高息不加分' },
+      dy_carry: { name: '股息率(股债利差)', desc: '红利策略的收益来源：优先显示中证官方D/P2股息率，按股息率−中国10Y国债评分；派息率>75%时触发高息陷阱保护，高息不加分' },
       stock_pb: { name: '个股PB水平', desc: '个股市净率在其历史区间锚点表中的位置——银行/水电/周期股的估值主锚' },
       roe_level: { name: 'ROE质量估值(PB-ROE)', desc: 'ROE=PB/PE（价格中性）；实际PB低于ROE×合理PE隐含的PB=质量调整后便宜' },
       payout_ratio: { name: '派息率可持续性', desc: '派息率=股息率×PE（价格中性）；30-60%健康，>75%可持续性风险，<20%红利支撑弱' },

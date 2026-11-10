@@ -2,6 +2,8 @@
  * 数据获取 — 对接 Yahoo Finance / CNN / CBOE 等公开数据源
  */
 
+import * as XLSX from 'xlsx';
+
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 // FRED 对完整浏览器 UA + 非浏览器 TLS 指纹会 tarpit（实测 Chrome/120 UA 12s+ 无响应，短 UA 正常），FRED 请求专用
 const UA_PLAIN = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
@@ -321,6 +323,59 @@ export class Fetcher {
       return { map, source: '蛋卷基金', updated_at: now() };
     } catch (e) {
       return { map: {}, source: '蛋卷错误: ' + String(e?.message || e).slice(0, 40), updated_at: now() };
+    }
+  }
+
+  // ========== 韭圈儿指数估值（独立指数 PE/PB/股息率 + 10年分位 + ROE） ==========
+  // 解决蛋卷只有「红利低波」、没有 930955 的问题：两个红利指数用各自独立代码
+  async getJiuquanValuations() {
+    try {
+      const d = await fetchJSONWithHeaders('https://ai2.jiucaishuo.com/api/index-valuation?category=zt', { 'Referer': 'https://www.jiucaishuo.com/' });
+      const rows = d?.rows || [];
+      if (!rows.length) throw new Error('空数据');
+      const map = {};
+      for (const it of rows) {
+        if (!it?.code) continue;
+        map[it.code] = {
+          name: it.name || null,
+          pe: it.pe ?? null, pb: it.pb ?? null,
+          pe_pct: it.pe_pct ?? null, pb_pct: it.pb_pct ?? null,
+          dy: it.xilv ?? null, dy_pct: it.xilv_pct ?? null,
+          roe: it.roe != null ? round(it.roe * 100, 2) : null,
+          date: it.update_time || null,
+          insufficient: !!it.insufficient,
+        };
+      }
+      return { map, source: '韭圈儿', updated_at: now() };
+    } catch (e) {
+      return { map: {}, source: '韭圈儿错误: ' + String(e?.message || e).slice(0, 40), updated_at: now() };
+    }
+  }
+
+  // ========== 中证指数官方每日估值（P/E、D/P 的总股本与计算用股本两口径） ==========
+  // 官方 Excel 为 BIFF8 .xls，含最近21个交易日；PB/ROE 只在月度指数单张中，见各标的 data_note
+  async getCSIIndexValuation(code) {
+    try {
+      const url = `https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/file/autofile/indicator/${code}indicator.xls`;
+      const res = await fetch(url, { headers: { 'User-Agent': UA, 'Referer': 'https://www.csindex.com.cn/' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = await res.arrayBuffer();
+      const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      if (!rows || rows.length < 2) throw new Error('空数据');
+      const r = rows[1]; // 最新交易日
+      const num = (v) => { const n = Number(v); return Number.isFinite(n) ? round(n, 2) : null; };
+      const raw = String(r[0] ?? '');
+      const date = raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}` : raw;
+      return {
+        code: String(r[1] ?? code), date,
+        pe1: num(r[6]), pe2: num(r[7]),
+        dy1: num(r[8]), dy2: num(r[9]),
+        source: '中证指数', updated_at: now(),
+      };
+    } catch (e) {
+      return { code, error: String(e?.message || e).slice(0, 80), source: '中证指数', updated_at: now() };
     }
   }
 
