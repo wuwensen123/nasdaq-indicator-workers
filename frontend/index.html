@@ -207,7 +207,7 @@
                     <div class="mt-3" id="detailFormula"></div>
                 </div>
                 <div class="card-footer text-center data-source" id="footerInfo">
-                    数据来源: Yahoo Finance, CNN Money, CBOE, U.S. Treasury
+                    数据来源: Yahoo Finance, CNN Money, CBOE, U.S. Treasury, 中证指数, 韭圈儿, 蛋卷基金
                 </div>
             </div>
         </section>
@@ -331,7 +331,7 @@ function renderDashboard(data) {
     renderGlobalIndicators(data.global_summary);
     if (data.analysis?.results) { renderTargets(data.analysis.results); renderFormula(data.analysis.results); }
     const footer = document.getElementById('footerInfo');
-    if (footer) footer.innerHTML = `数据来源: Yahoo Finance, CNN Money, CBOE, U.S. Treasury ${data.fetch_time_seconds ? `（数据获取耗时 ${data.fetch_time_seconds} 秒）` : ''}`;
+    if (footer) footer.innerHTML = `数据来源: Yahoo Finance, CNN Money, CBOE, U.S. Treasury, 中证指数, 韭圈儿, 蛋卷基金 ${data.fetch_time_seconds ? `（数据获取耗时 ${data.fetch_time_seconds} 秒）` : ''}`;
     document.getElementById('loadingState').classList.add('d-none');
     document.getElementById('errorState').classList.add('d-none');
     document.getElementById('dashboardContent').classList.remove('d-none');
