@@ -170,7 +170,7 @@ export class Analyzer {
       current_price: td.current_price, composite_score: composite, market_position: pos.label,
       position_color: pos.color, strategy, indicators,
       formula: `战略评分 = ${cfg.indicators.map(fw).join(' + ')}｜倍数 = 1x底仓 + 估值/回撤加速${cfg.tactical_fg !== false ? `${coeff !== 1 ? ` × 情绪${coeff}` : ''}` : '（无情绪叠加）'}`,
-      formula_detail: `十年定投双层架构：评分0=便宜→100=贵（估值/分位项≈历史分位）；定投倍数以1x为底仓，仅在综合评分≤40、PE分位≤40%或距52周高点回撤≥15%时加速（1.5x/2x/3x）；估值极端高位时回撤不加速（股票PE分位/银行PB分位/商品实际价格分位≥85%）；不暂停、不减仓。依据：Vanguard定投现金拖累、AQR Market Timing Sin a Little、Faber均线风控${cfg.method_note ? `｜${cfg.method_note}` : ''}${cfg.data_note ? `｜${cfg.data_note}` : ''}`,
+      formula_detail: `十年定投双层架构：评分0=便宜→100=贵（估值/分位项≈历史分位）；定投倍数以1x为底仓，仅在综合评分≤40、PE分位≤40%或距52周高点回撤≥15%时加速（1.5x/2x/3x）；估值极端高位时回撤不加速（股票PE分位/银行PB分位/商品实际价格分位≥85%）；不暂停、不减仓，1x底仓不因贪婪减速。依据：Vanguard定投现金拖累、AQR Market Timing Sin a Little、Faber均线风控${cfg.method_note ? `｜${cfg.method_note}` : ''}${cfg.data_note ? `｜${cfg.data_note}` : ''}`,
     };
   }
 
@@ -498,12 +498,21 @@ export class Analyzer {
     return { coeff, reason: reasons.join('；') || null };
   }
 
-  // 应用情绪系数（只作用于1x及以上底仓；不暂停、不减仓）
+  // 应用情绪系数：只微调加速部分，1x底仓不因贪婪降到1x以下；不暂停、不减仓
   _applyTactical(base, coeff, reason) {
     if (coeff === 1 || !reason || ![1, 1.5, 2, 3].includes(base.multiple)) return base;
-    const m = Math.round(base.multiple * coeff * 100) / 100;
+    const effective = base.multiple <= 1 && coeff < 1 ? 1 : coeff;
+    if (effective === 1) {
+      return { ...base, description: `${base.description}｜${reason}（1x底仓不减速）` };
+    }
+    const m = Math.round(base.multiple * effective * 4) / 4;
     const fmt = x => String(parseFloat(x.toFixed(2)));
-    return { ...base, multiple: m, action: `${fmt(m)}倍定投`, description: `${base.description}｜情绪叠加×${coeff}：${reason}` };
+    const tone = m >= 2
+      ? { color: '#fd7e14', icon: '📈' }
+      : m > 1
+        ? { color: '#ffc107', icon: '📊' }
+        : { color: '#28a745', icon: '✅' };
+    return { ...base, multiple: m, action: `${fmt(m)}倍定投`, description: `${base.description}｜情绪叠加×${effective}：${reason}`, ...tone };
   }
 
   _marketPosition(s) {
