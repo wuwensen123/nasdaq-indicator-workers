@@ -137,6 +137,20 @@ body { background: var(--bg-dark); color: var(--text-primary); font-family: -app
               <div style="font-size:0.75rem;color:var(--text-secondary);">费率说明：A股佣金0.025%+最低5元；美股佣金0.03%+最低1美元；QDII基金免印花税；期末卖出按卖出费扣减。</div>
             </div>
           </div>
+          <div class="mb-3">
+            <label class="form-label">基准指数对比（可选）</label>
+            <select class="form-select" id="benchmarkSymbol" onchange="toggleBenchmarkCustom()">
+              <option value="">不对比</option>
+              <option value="VOO">VOO 标普500 ETF</option>
+              <option value="QQQ">QQQ 纳斯达克100 ETF</option>
+              <option value="^SP500TR">标普500全收益（1988年起，含分红）</option>
+              <option value="^NDX">纳斯达克100指数（1985年起）</option>
+              <option value="000300.SS">沪深300（2005年起）</option>
+              <option value="custom">自定义代码…</option>
+            </select>
+            <input type="text" class="form-control mt-2" id="benchmarkCustom" style="display:none;" placeholder="如 SPY、^GSPC">
+            <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">基准按相同的日期/频率/金额/投入方式同步买入并持有，不计手续费，用于衡量"跑赢/跑输大盘"。</div>
+          </div>
           </div>
 
           <!-- 多方案对比模式 -->
@@ -288,6 +302,17 @@ function collectFees() {
     customCommission: document.getElementById('customCommission').value || undefined,
     minCommission: document.getElementById('minCommission').value || undefined,
   };
+}
+
+function toggleBenchmarkCustom() {
+  const v = document.getElementById('benchmarkSymbol').value;
+  document.getElementById('benchmarkCustom').style.display = v === 'custom' ? '' : 'none';
+}
+
+function getBenchmarkSymbol() {
+  const v = document.getElementById('benchmarkSymbol').value;
+  if (v === 'custom') return (document.getElementById('benchmarkCustom').value || '').trim().toUpperCase() || null;
+  return v || null;
 }
 
 // 页面加载时初始化显示状态
@@ -500,6 +525,7 @@ async function runBacktest() {
     startDate: document.getElementById('startDate').value,
     endDate: document.getElementById('endDate').value,
     fees: collectFees(),
+    benchmark: getBenchmarkSymbol(),
   };
 
   const compareMode = document.getElementById('compareMode').value;
@@ -765,6 +791,64 @@ function renderResults(data) {
     </div>
   </div>`;
 
+  // 基准指数对比
+  const bench = data.benchmark;
+  if (data.benchmarkWarning) {
+    html += `<div class="card mb-4"><div class="card-body" style="color:var(--yellow);">⚠️ ${data.benchmarkWarning}</div></div>`;
+  }
+  if (bench) {
+    const diffValue = data.finalValue - bench.finalValue;
+    const diffPct = bench.finalValue > 0 ? diffValue / bench.finalValue * 100 : 0;
+    const cagrDiff = data.cagr - bench.cagr;
+    const win = diffValue >= 0;
+    const diffColor = (d, highGood) => {
+      if (Math.abs(d) < 0.005) return 'var(--text-secondary)';
+      return (highGood ? d >= 0 : d <= 0) ? 'var(--green)' : 'var(--red)';
+    };
+    const num = (v) => (v >= 0 ? '+' : '') + v.toFixed(2);
+    html += `<div class="card mb-4">
+      <div class="card-header">🎯 与基准对比 · ${bench.name}</div>
+      <div class="card-body">
+        <div class="row g-3 mb-3">
+          <div class="col-12 col-md-4">
+            <div class="result-card">
+              <div class="label">${win ? '跑赢' : '跑输'}基准</div>
+              <div class="value" style="color:${win ? 'var(--green)' : 'var(--red)'};">${win ? '+' : '-'}¥${fmt(Math.abs(diffValue))}</div>
+              <div class="label">${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(2)}%</div>
+            </div>
+          </div>
+          <div class="col-12 col-md-4">
+            <div class="result-card">
+              <div class="label">年化超额收益</div>
+              <div class="value" style="color:${diffColor(cagrDiff, true)};">${num(cagrDiff)}%</div>
+              <div class="label">策略 ${data.cagr}% vs 基准 ${bench.cagr}%</div>
+            </div>
+          </div>
+          <div class="col-12 col-md-4">
+            <div class="result-card">
+              <div class="label">基准最终金额</div>
+              <div class="value" style="color:var(--text-primary);">¥${fmt(bench.finalValue)}</div>
+              <div class="label">同期投入 ¥${fmt(bench.totalInvested)}</div>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive"><table class="table">
+          <thead><tr><th>指标</th><th>你的策略</th><th>基准 ${bench.symbol}</th><th>差异</th></tr></thead>
+          <tbody>
+            <tr><td>最终金额</td><td>¥${fmt(data.finalValue)}</td><td>¥${fmt(bench.finalValue)}</td><td style="color:${diffColor(diffValue, true)};">${diffValue >= 0 ? '+' : '-'}¥${fmt(Math.abs(diffValue))}</td></tr>
+            <tr><td>本金倍数</td><td>${data.multiple}x</td><td>${bench.multiple}x</td><td style="color:${diffColor(data.multiple - bench.multiple, true)};">${num(data.multiple - bench.multiple)}x</td></tr>
+            <tr><td>CAGR</td><td>${data.cagr}%</td><td>${bench.cagr}%</td><td style="color:${diffColor(cagrDiff, true)};">${num(cagrDiff)}%</td></tr>
+            <tr><td>XIRR</td><td>${data.xirr}%</td><td>${bench.xirr}%</td><td style="color:${diffColor(data.xirr - bench.xirr, true)};">${num(data.xirr - bench.xirr)}%</td></tr>
+            <tr><td>最大回撤</td><td>${data.maxDrawdown}%</td><td>${bench.maxDrawdown}%</td><td style="color:${diffColor(data.maxDrawdown - bench.maxDrawdown, false)};">${num(data.maxDrawdown - bench.maxDrawdown)}%</td></tr>
+            <tr><td>夏普比率</td><td>${data.sharpeRatio}</td><td>${bench.sharpeRatio}</td><td style="color:${diffColor(data.sharpeRatio - bench.sharpeRatio, true)};">${num(data.sharpeRatio - bench.sharpeRatio)}</td></tr>
+            <tr><td>年化波动率</td><td>${data.annualVol}%</td><td>${bench.annualVol}%</td><td style="color:${diffColor(data.annualVol - bench.annualVol, false)};">${num(data.annualVol - bench.annualVol)}%</td></tr>
+          </tbody>
+        </table></div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);">基准按相同日期、频率、金额、投入方式同步买入并持有，不计手续费。</div>
+      </div>
+    </div>`;
+  }
+
   // 再平衡对比（如果数据存在且与原始结果不同）
   const hasRebal = data.rebalanced && Math.abs(data.rebalanced.finalValue - data.finalValue) > 1;
   if (hasRebal) {
@@ -790,10 +874,13 @@ function renderResults(data) {
 
   // 逐年表格
   const rebalYearly = hasRebal ? data.rebalanced.yearly : [];
+  const benchYearMap = {};
+  if (bench) (bench.yearly || []).forEach(b => { benchYearMap[b.year] = b.value; });
   html += `<div class="card"><div class="card-header">📅 逐年收益明细</div><div class="card-body"><div class="table-responsive"><table class="table table-striped"><thead><tr>
     <th>年份</th><th>当年投入</th><th>累计投入</th>
     <th>不再平衡 年末金额</th><th>不再平衡 年收益</th>
     ${hasRebal ? '<th>再平衡后 年末金额</th><th>再平衡后 年收益</th>' : ''}
+    ${bench ? `<th>基准 ${bench.symbol} 年末金额</th>` : ''}
   </tr></thead><tbody>`;
   const yearly = data.yearly || [];
   for (let idx = 0; idx < yearly.length; idx++) {
@@ -809,6 +896,7 @@ function renderResults(data) {
       <td>¥${fmt(y.value)}</td>
       <td style="color:${color};">${y.return >= 0 ? '+' : ''}${y.return}%</td>
       ${hasRebal && ry ? `<td>¥${fmt(ry.value)}</td><td style="color:${rColor};">${ry.return >= 0 ? '+' : ''}${ry.return}%</td>` : ''}
+      ${bench ? `<td>¥${fmt(benchYearMap[y.year] || 0)}</td>` : ''}
     </tr>`;
   }html += `</tbody></table></div></div></div>`;
 
@@ -825,11 +913,20 @@ function renderResults(data) {
   const returns = (data.yearly || []).map(y => y.return);
 
   setTimeout(() => {
+    const valueDatasets = [{
+      label: '你的策略', data: values, borderColor: '#0969da', backgroundColor: 'rgba(9,105,218,0.1)', fill: true, tension: 0.3
+    }];
+    if (bench) {
+      valueDatasets.push({
+        label: `基准 ${bench.symbol}（买入持有）`,
+        data: years.map(y => benchYearMap[y] ?? null),
+        borderColor: '#bf8700', backgroundColor: 'rgba(191,135,0,0.08)',
+        borderDash: [6, 4], fill: false, tension: 0.3, pointRadius: 0,
+      });
+    }
     new Chart(document.getElementById('valueChart'), {
       type: 'line', data: {
-        labels: years, datasets: [{
-          label: '总金额', data: values, borderColor: '#0969da', backgroundColor: 'rgba(9,105,218,0.1)', fill: true, tension: 0.3
-        }]
+        labels: years, datasets: valueDatasets
       }, options: { responsive: true, plugins: { legend: { labels: { color: '#1a1a2e' } } },
         scales: { x: { ticks: { color: '#586069' } }, y: { ticks: { color: '#586069', callback: v => '¥' + (v/10000).toFixed(0) + '万' } } }
       }

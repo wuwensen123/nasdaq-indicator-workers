@@ -194,13 +194,11 @@ export function runBacktest(config) {
     return dates.length ? priceMaps[assetIdx][dates[dates.length - 1]] : 0;
   }
 
-  // 构建分红索引: { date: dividendAmount }
-  const divMaps = assets.map(a => a.dividends || {});
-
   // 获取所有交易日（用于年底计算）
   const allDates = [...new Set(assets.flatMap(a => a.dates))].sort();
 
   // 逐次定投
+  // 注：价格序列使用 Yahoo adjclose（已含分红再投资），因此不再单独叠加分红，避免重复计算
   for (const date of investDates) {
     for (let i = 0; i < assets.length; i++) {
       const investAmt = totalAmount * assets[i].weight;
@@ -209,16 +207,6 @@ export function runBacktest(config) {
         shares[i] += investShares(investAmt, price, feePlan[i]);
         cashflows.push(-investAmt);
         cashflowDates.push(date);
-      }
-    }
-  }
-
-  // 分红再投资
-  for (let i = 0; i < assets.length; i++) {
-    for (const [date, divAmt] of Object.entries(divMaps[i])) {
-      const price = findPrice(i, date);
-      if (price && price > 0) {
-        shares[i] += shares[i] * divAmt / price;
       }
     }
   }
@@ -285,11 +273,12 @@ export function runBacktest(config) {
       }
     }
 
-    // 计算该年末市值（用累计份额 × 年末价格）
+    // 计算该年末市值（用累计份额 × 年末价格；最后一年按含卖出费口径，与"最终金额"对齐）
     let yearEndValue = 0;
     for (let i = 0; i < assets.length; i++) {
       const price = findPrice(i, yearEnd) || 0;
-      yearEndValue += cumShares[i] * price;
+      const val = cumShares[i] * price;
+      yearEndValue += (year === endYear) ? exitValue(val, feePlan[i]) : val;
     }
 
     // 累计投入
@@ -412,14 +401,6 @@ export function runBacktest(config) {
         const investAmt = totalAmount * assets[i].weight;
         const price = findPrice(i, date);
         if (price && price > 0) rebalCumShares[i] += investShares(investAmt, price, feePlan[i]);
-      }
-    }
-    for (let i = 0; i < assets.length; i++) {
-      const divMap = divMaps[i];
-      for (const [date, divAmt] of Object.entries(divMap)) {
-        if (!date.startsWith(`${year}-`)) continue;
-        const price = findPrice(i, date);
-        if (price && price > 0) rebalCumShares[i] += rebalCumShares[i] * divAmt / price;
       }
     }
     for (const rbDate of rebalanceDates) {

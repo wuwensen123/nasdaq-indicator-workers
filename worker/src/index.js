@@ -12,6 +12,17 @@ import { runBacktest, compareBacktests, rollingStartBacktest } from './backtest.
 const fetcher = new Fetcher();
 const analyzer = new Analyzer();
 
+// 基准指数中文名
+const BENCHMARK_NAMES = {
+  'VOO': 'VOO 标普500 ETF',
+  'QQQ': 'QQQ 纳斯达克100 ETF',
+  'SPY': 'SPY 标普500 ETF',
+  '^SP500TR': '标普500全收益指数',
+  '^NDX': '纳斯达克100指数',
+  '^GSPC': '标普500指数',
+  '000300.SS': '沪深300',
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -232,7 +243,7 @@ export default {
     if (path === '/api/backtest' && request.method === 'POST') {
       try {
         const body = await request.json();
-        const { assets, amount, frequency, startDate, endDate, rebalance, investMode, investEndDate, fees } = body;
+        const { assets, amount, frequency, startDate, endDate, rebalance, investMode, investEndDate, fees, benchmark } = body;
         if (!assets || !assets.length || !amount || !startDate || !endDate) {
           return json({ success: false, error: '缺少参数' }, 400);
         }
@@ -246,7 +257,44 @@ export default {
           assetData.push({ ...a, ...hist });
         }
         const result = runBacktest({ assets: assetData, amount, frequency, startDate, endDate, rebalance: rebalance || 'none', investMode: investMode || 'dca', investEndDate, fees });
-        return json({ success: true, ...result });
+
+        // 基准指数对比：完全复制同样的现金流，不计手续费
+        let benchmarkResult = null;
+        let benchmarkWarning = null;
+        if (benchmark) {
+          const bhist = await fetcher.getHistoricalPrices(benchmark, startDate, endDate);
+          const bDates = [...(bhist.dates || [])].sort();
+          if (!bDates.length) {
+            benchmarkWarning = `无法获取基准 ${benchmark} 的历史数据，请更换基准`;
+          } else if (new Date(bDates[0]).getTime() - new Date(startDate).getTime() > 10 * 86400000) {
+            // 基准数据起点晚于回测起点（允许 10 天周末/假期容差）
+            benchmarkWarning = `${benchmark} 最早只有 ${bDates[0]} 的数据，无法覆盖 ${startDate} 起的回测，请更换基准（如 ^SP500TR）`;
+          } else {
+            const b = runBacktest({
+              assets: [{ symbol: benchmark, weight: 1, ...bhist }],
+              amount, frequency, startDate, endDate,
+              rebalance: 'none', investMode: investMode || 'dca', investEndDate,
+              fees: { enabled: false },
+            });
+            if (b) {
+              benchmarkResult = {
+                symbol: benchmark,
+                name: BENCHMARK_NAMES[benchmark] || benchmark,
+                totalInvested: b.totalInvested,
+                finalValue: b.finalValue,
+                multiple: b.multiple,
+                cagr: b.cagr,
+                xirr: b.xirr,
+                sharpeRatio: b.sharpeRatio,
+                maxDrawdown: b.maxDrawdown,
+                annualVol: b.annualVol,
+                yearly: (b.yearly || []).map(y => ({ year: y.year, invested: y.invested, value: y.value })),
+              };
+            }
+          }
+        }
+
+        return json({ success: true, ...result, benchmark: benchmarkResult, benchmarkWarning });
       } catch (e) {
         return json({ success: false, error: e.message }, 500);
       }
