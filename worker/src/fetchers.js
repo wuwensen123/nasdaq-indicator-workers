@@ -59,8 +59,8 @@ async function getYahooAuth() {
   return yahooAuth;
 }
 
-async function fetchYahooTrailingPE(symbol) {
-  // crumb 失效（401/403）时清缓存重取一次
+async function fetchYahooPE(symbol) {
+  // crumb 失效（401/403）时清缓存重取一次；一次请求同时取 trailing 与 forward
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const { cookie, crumb } = await getYahooAuth();
@@ -69,11 +69,11 @@ async function fetchYahooTrailingPE(symbol) {
       if ((res.status === 401 || res.status === 403) && attempt === 0) { yahooAuth = null; continue; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
-      const pe = d?.quoteSummary?.result?.[0]?.summaryDetail?.trailingPE?.raw;
-      return pe != null ? pe : null;
+      const sd = d?.quoteSummary?.result?.[0]?.summaryDetail;
+      return { trailing: sd?.trailingPE?.raw ?? null, forward: sd?.forwardPE?.raw ?? null };
     } catch { yahooAuth = null; }
   }
-  return null;
+  return { trailing: null, forward: null };
 }
 
 export class Fetcher {
@@ -93,6 +93,20 @@ export class Fetcher {
       this._vixCache = { ts: Date.now(), data };
       return data;
     } catch { return { value: null, change: 0, source: 'Yahoo Finance', updated_at: now() }; }
+  }
+
+  // ========== VIX3M（3个月波动率，用于 VIX/VIX3M 期限结构） ==========
+  async getVIX3M() {
+    try {
+      const d = await fetchJSON('https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX3M?range=5d&interval=1d');
+      const meta = d.chart?.result?.[0]?.meta;
+      const quotes = d.chart?.result?.[0]?.indicators?.quote?.[0];
+      if (!meta || !quotes) return { value: null, change: 0, source: 'Yahoo Finance (^VIX3M)', updated_at: now() };
+      const close = quotes.close?.filter(c => c != null);
+      const value = meta.regularMarketPrice ?? close?.[close.length - 1];
+      const change = close?.length >= 2 ? ((close[close.length - 1] - close[close.length - 2]) / close[close.length - 2]) * 100 : 0;
+      return { value: round(value), change: round(change), source: 'Yahoo Finance (^VIX3M)', updated_at: now() };
+    } catch { return { value: null, change: 0, source: 'Yahoo Finance (^VIX3M)', updated_at: now() }; }
   }
 
   // ========== Fear & Greed ==========
@@ -238,6 +252,19 @@ export class Fetcher {
       if (vals.length) return { value: round(vals[vals.length - 1]), source: 'Treasury.gov', updated_at: now() };
     } catch {}
     return { value: null, source: 'FRED+Treasury均失败', updated_at: now() };
+  }
+
+  // ========== 穆迪Baa公司债收益率（EY spread vs Baa，JPM估值表口径） ==========
+  async getBaaYield() {
+    try {
+      const csv = await fetch('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DBAA', { headers: { 'User-Agent': UA_PLAIN } }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); });
+      const lines = csv.trim().split('\n');
+      for (let i = lines.length - 1; i >= 1; i--) {
+        const v = parseFloat(lines[i].split(',')[1]);
+        if (!isNaN(v)) return { value: round(v), source: 'FRED (DBAA)', updated_at: now() };
+      }
+    } catch {}
+    return { value: null, source: 'FRED (DBAA)', updated_at: now() };
   }
 
   // ========== 黄金实际价格历史分位（GC=F月线 ÷ CPI，黄金的"CAPE"） ==========
@@ -392,13 +419,45 @@ export class Fetcher {
     return { value: null, source: name, updated_at: now() };
   }
 
-  // ========== 个股PB（东方财富，银行股估值主锚） ==========
-  // 注: f167带×100缩放且字段口径不稳，用 价格(f43/100)÷每股净资产(f92) 自算，f167 兜底
+  // ========== 腾讯A股快照（一次请求同时拿 PB/PE/股息率/价格） ==========
+  // 同一次 refresh 内 getPERatio/getStockPB/getDividendYield 共用，省子请求
+  async getTencentQuote(symbol) {
+    this._txQuoteCache = this._txQuoteCache || {};
+    if (this._txQuoteCache[symbol] !== undefined) return this._txQuoteCache[symbol];
+    try {
+      const code = symbol.replace('.SS', '').replace('.SZ', '');
+      const mk = symbol.endsWith('.SS') ? 'sh' : 'sz';
+      const text = await fetchText('https://qt.gtimg.cn/q=' + mk + code);
+      const parts = text.split('~');
+      if (parts.length < 65) { this._txQuoteCache[symbol] = null; return null; }
+      const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+      const data = {
+        price: num(parts[3]),
+        pe: num(parts[39]),
+        pb: num(parts[46]),
+        dividend_yield: num(parts[64]),
+      };
+      this._txQuoteCache[symbol] = data;
+      return data;
+    } catch { this._txQuoteCache[symbol] = null; return null; }
+  }
+
+  // ========== 个股PB（腾讯优先，东财兜底） ==========
+  // 注: 东财 f167带×100缩放且字段口径不稳，用 价格(f43/100)÷每股净资产(f92) 自算，f167 兜底
   async getStockPB(symbol) {
+    // 腾讯字段46=PB、39=PE，一次请求；对连续请求比东财稳
+    const q = await this.getTencentQuote(symbol);
+    if (q?.pb != null && q.pb > 0.1 && q.pb < 30) {
+      return {
+        value: round(q.pb, 2),
+        pe: q.pe != null && q.pe > 0 && q.pe < 200 ? round(q.pe, 2) : null,
+        source: '腾讯财经', updated_at: now(),
+      };
+    }
+    // 东财兜底（单次，避免连续请求被掐）
     try {
       const code = symbol.replace('.SS', '').replace('.SZ', '');
       const market = symbol.endsWith('.SS') ? '1' : '0';
-      // f162=动态PE（×100），f167=PB（兜底）；一次请求同时拿到 PB 与 PE，供 PB-ROE/派息率使用
       const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${market}.${code}&fields=f43,f92,f162,f167`;
       const d = await fetchJSON(url);
       const data = d?.data || {};
@@ -418,25 +477,23 @@ export class Fetcher {
 
     // ========== PE Ratio ==========
   async getPERatio(symbol, name = '') {
-    // 中国A股: 先用腾讯财经
+    // 中国A股: 先用腾讯财经（与 getStockPB/getDividendYield 共用同一快照）
     if (symbol.endsWith('.SS') || symbol.endsWith('.SZ')) {
-      try {
-        const code = symbol.replace('.SS', '').replace('.SZ', '');
-        const market = symbol.endsWith('.SS') ? 'sh' : 'sz';
-        const text = await fetchText('https://qt.gtimg.cn/q=' + market + code);
-        const parts = text.split('~');
-        if (parts.length >= 41) {
-          const pe = parseFloat(parts[39]);
-          if (!isNaN(pe) && pe > 0 && pe < 200) {
-            return { value: round(pe), source: '腾讯财经', updated_at: now(), name };
-          }
-        }
-      } catch {}
+      const q = await this.getTencentQuote(symbol);
+      if (q?.pe != null && q.pe > 0 && q.pe < 200) {
+        return { value: round(q.pe), forward_pe: null, source: '腾讯财经', updated_at: now(), name };
+      }
     }
     // Yahoo Finance v10（cookie+crumb 认证，与官网网页口径一致）
     try {
-      const pe = await fetchYahooTrailingPE(symbol);
-      if (pe != null && pe > 0 && pe < 200) return { value: round(pe), source: 'Yahoo Finance', updated_at: now(), name };
+      const pe = await fetchYahooPE(symbol);
+      if (pe.trailing != null && pe.trailing > 0 && pe.trailing < 200) {
+        return {
+          value: round(pe.trailing),
+          forward_pe: pe.forward != null && pe.forward > 0 && pe.forward < 200 ? round(pe.forward) : null,
+          source: 'Yahoo Finance', updated_at: now(), name,
+        };
+      }
     } catch {}
     // worldperatio.com (QQQ/VOO)
     try {
@@ -448,75 +505,122 @@ export class Fetcher {
         const m = html.match(/P\/E\s*Ratio:\s*<[^>]*>([0-9.]+)<\/b>/i);
         if (m) {
           const pe = parseFloat(m[1]);
-          if (pe > 5 && pe < 100) return { value: round(pe), source: 'worldperatio.com', updated_at: now(), name };
+          if (pe > 5 && pe < 100) return { value: round(pe), forward_pe: null, source: 'worldperatio.com', updated_at: now(), name };
         }
       }
     } catch {}
-    return { value: null, source: 'Yahoo Finance', updated_at: now(), name };
+    return { value: null, forward_pe: null, source: 'Yahoo Finance', updated_at: now(), name };
   }
+
+  // ========== Forward P/E（StockAnalysis.com，ETF 日更） ==========
+  // Yahoo 对 ETF 的 forwardPE 返回空对象；StockAnalysis 有 QQQ/VOO 的 Forward PE
+  async getForwardPE(symbol) {
+    try {
+      const html = await fetchText(`https://stockanalysis.com/etf/${symbol.toLowerCase()}/`);
+      const m = html.match(/Forward PE<\/td>\s*<td[^>]*>([0-9.]+)<\/td>/i);
+      const v = m ? parseFloat(m[1]) : null;
+      if (v != null && v > 5 && v < 100) return { value: round(v), source: 'StockAnalysis.com', updated_at: now() };
+    } catch {}
+    return { value: null, source: 'StockAnalysis.com', updated_at: now() };
+  }
+
 // ========== 技术指标（RSI, MA, MACD） ==========
   async getTechnicalIndicators(symbol, period = '1y') {
     const result = { current_price: null, rsi: null, ma200: null, ma200_pct: null, ma50: null, ma50_pct: null, macd: null, macd_signal: null, high_52w: null, low_52w: null, pct_from_52w_high: null, source: 'Yahoo Finance + 计算', updated_at: now() };
+    const isCN = symbol.endsWith('.SS') || symbol.endsWith('.SZ');
+    let txTried = false;
+    // A股优先用腾讯前复权日线：Yahoo 对 .SS 偶发限流/无历史，且腾讯一次请求即可算 MA200
+    if (isCN) {
+      txTried = true;
+      const tx = await this.getTencentTechnical(symbol);
+      if (tx) return tx;
+    }
     try {
       const d = await fetchJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${period}&interval=1d`);
       const quotes = d.chart?.result?.[0];
-      if (!quotes) return result;
-      const close = quotes.indicators?.quote?.[0]?.close?.filter(c => c != null) || [];
-      if (!close.length) return result;
-      // 先取最新价：部分指数（如930955）Yahoo只有单点报价、没有历史K线
-      result.current_price = round(close[close.length - 1]);
-      if (close.length < 50) return result;
+      const close = quotes?.indicators?.quote?.[0]?.close?.filter(c => c != null) || [];
+      if (close.length) {
+        // 先取最新价：部分指数（如930955）Yahoo只有单点报价、没有历史K线
+        result.current_price = round(close[close.length - 1]);
+        if (close.length >= 50) {
+          // RSI(14)
+          result.rsi = round(calcRSI(close, 14));
 
-      // RSI(14)
-      result.rsi = round(calcRSI(close, 14));
+          // MA
+          result.ma50 = round(calcMA(close, 50));
+          result.ma50_pct = round((close[close.length - 1] / result.ma50 - 1) * 100);
+          if (close.length >= 200) {
+            result.ma200 = round(calcMA(close, 200));
+            result.ma200_pct = round((close[close.length - 1] / result.ma200 - 1) * 100);
+          }
 
-      // MA
-      result.ma50 = round(calcMA(close, 50));
-      result.ma50_pct = round((close[close.length - 1] / result.ma50 - 1) * 100);
-      if (close.length >= 200) {
-        result.ma200 = round(calcMA(close, 200));
-        result.ma200_pct = round((close[close.length - 1] / result.ma200 - 1) * 100);
+          // MACD
+          const ema12 = calcEMA(close, 12);
+          const ema26 = calcEMA(close, 26);
+          const macdLine = ema12 - ema26;
+          result.macd = round(macdLine);
+          // 计算实际 MACD 历史值，再取 EMA(9) 作信号线
+          const macdValues = [];
+          for (let i = 26; i < close.length; i++) {
+            const e12 = calcEMA(close.slice(0, i + 1), 12);
+            const e26 = calcEMA(close.slice(0, i + 1), 26);
+            macdValues.push(e12 - e26);
+          }
+          result.macd_signal = macdValues.length >= 9 ? round(calcEMA(macdValues, 9)) : round(macdLine);
+
+          // 52周高低点
+          const yearData = close.slice(-252);
+          result.high_52w = round(Math.max(...yearData));
+          result.low_52w = round(Math.min(...yearData));
+          result.pct_from_52w_high = round((close[close.length - 1] / result.high_52w - 1) * 100);
+        }
       }
-
-      // MACD
-      const ema12 = calcEMA(close, 12);
-      const ema26 = calcEMA(close, 26);
-      const macdLine = ema12 - ema26;
-      result.macd = round(macdLine);
-      // 计算实际 MACD 历史值，再取 EMA(9) 作信号线
-      const macdValues = [];
-      for (let i = 26; i < close.length; i++) {
-        const e12 = calcEMA(close.slice(0, i + 1), 12);
-        const e26 = calcEMA(close.slice(0, i + 1), 26);
-        macdValues.push(e12 - e26);
-      }
-      result.macd_signal = macdValues.length >= 9 ? round(calcEMA(macdValues, 9)) : round(macdLine);
-
-      // 52周高低点
-      const yearData = close.slice(-252);
-      result.high_52w = round(Math.max(...yearData));
-      result.low_52w = round(Math.min(...yearData));
-      result.pct_from_52w_high = round((close[close.length - 1] / result.high_52w - 1) * 100);
     } catch {}
+
+    // A股腾讯已优先尝试；此处只处理未尝试过的场景（保留给未来非CN扩展）
+    if (!txTried && isCN && (result.current_price == null || result.ma200_pct == null)) {
+      const tx = await this.getTencentTechnical(symbol);
+      if (tx) return tx;
+    }
     return result;
   }
-// ========== 股息率（中国 A 股） ==========
-  async getDividendYield(symbol, peRatio, stockType) {
-    // 方案0: 腾讯财经字段64（TTM股息率）——东财 push2 对连续请求会掐连接，腾讯更稳
+
+  // 腾讯前复权日线（A股 fallback）：320天，计算 MA50/MA200、RSI、52周高低点
+  async getTencentTechnical(symbol) {
     try {
       const code = symbol.replace('.SS', '').replace('.SZ', '');
       const mk = symbol.endsWith('.SS') ? 'sh' : 'sz';
-      const text = await fetchText('https://qt.gtimg.cn/q=' + mk + code);
-      const parts = text.split('~');
-      if (parts.length > 64) {
-        const dy = parseFloat(parts[64]);
-        if (!isNaN(dy) && dy > 0.1 && dy < 15) return { value: round(dy), source: '腾讯财经', updated_at: now() };
-        console.error('腾讯股息率字段异常', symbol, 'parts=' + parts.length, 'f64=' + parts[64]);
-      } else {
-        console.error('腾讯股息率响应过短', symbol, 'parts=' + parts.length, 'len=' + text.length);
-      }
-    } catch (e) {
-      console.error('腾讯股息率请求失败', symbol, String(e?.message || e).slice(0, 80));
+      // 不加 qfq：与 Yahoo chart 的未复权 close 口径一致，避免分红除权造成 MA200 跳变
+      const d = await fetchJSON(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${mk}${code},day,,,320,`);
+      const item = d?.data?.[`${mk}${code}`];
+      const rows = item?.qfqday || item?.day || [];
+      const closes = rows.map(r => parseFloat(r[2])).filter(v => !isNaN(v));
+      if (closes.length < 200) return null;
+      const highs = rows.map(r => parseFloat(r[3])).filter(v => !isNaN(v));
+      const lows = rows.map(r => parseFloat(r[4])).filter(v => !isNaN(v));
+      const current = closes[closes.length - 1];
+      const ma200 = calcMA(closes, 200);
+      const ma50 = calcMA(closes, 50);
+      const high52 = Math.max(...highs.slice(-252));
+      const low52 = Math.min(...lows.slice(-252));
+      return {
+        current_price: round(current),
+        rsi: round(calcRSI(closes, 14)),
+        ma200: round(ma200), ma200_pct: round((current / ma200 - 1) * 100),
+        ma50: round(ma50), ma50_pct: round((current / ma50 - 1) * 100),
+        macd: null, macd_signal: null,
+        high_52w: round(high52), low_52w: round(low52),
+        pct_from_52w_high: round((current / high52 - 1) * 100),
+        source: '腾讯财经 K线', updated_at: now(),
+      };
+    } catch { return null; }
+  }
+// ========== 股息率（中国 A 股） ==========
+  async getDividendYield(symbol, peRatio, stockType) {
+    // 方案0: 腾讯财经字段64（TTM股息率），与 getStockPB 共用同一快照
+    const q = await this.getTencentQuote(symbol);
+    if (q?.dividend_yield != null && q.dividend_yield > 0.1 && q.dividend_yield < 15) {
+      return { value: round(q.dividend_yield), source: '腾讯财经', updated_at: now() };
     }
     // 方案1: 东方财富 push2 API（f186，兜底）
     try {

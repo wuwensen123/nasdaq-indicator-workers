@@ -1,0 +1,141 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Fetcher } from '../src/fetchers.js';
+
+function mockResponse(body, { status = 200, setCookie = [] } = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { getSetCookie: () => setCookie },
+    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+    json: async () => (typeof body === 'string' ? JSON.parse(body) : body),
+  };
+}
+
+test('getPERatio returns trailing and forward PE from Yahoo summaryDetail', async () => {
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    if (String(url).includes('fc.yahoo.com')) return mockResponse('', { setCookie: ['A=1; Path=/'] });
+    if (String(url).includes('getcrumb')) return mockResponse('crumb123');
+    if (String(url).includes('quoteSummary')) {
+      return mockResponse({
+        quoteSummary: { result: [{ summaryDetail: {
+          trailingPE: { raw: 27.98 }, forwardPE: { raw: 25.5 },
+        } }] },
+      });
+    }
+    return mockResponse('not found', { status: 404 });
+  };
+  const r = await new Fetcher().getPERatio('QQQ');
+  assert.equal(r.value, 27.98);
+  assert.equal(r.forward_pe, 25.5);
+  assert.equal(r.source, 'Yahoo Finance');
+  assert.ok(urls.some(u => u.includes('quoteSummary')));
+});
+
+test('getPERatio handles missing forwardPE without blocking trailingPE', async () => {
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('fc.yahoo.com')) return mockResponse('', { setCookie: ['A=1; Path=/'] });
+    if (String(url).includes('getcrumb')) return mockResponse('crumb123');
+    if (String(url).includes('quoteSummary')) {
+      return mockResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 23.81 } } }] } });
+    }
+    return mockResponse('not found', { status: 404 });
+  };
+  const r = await new Fetcher().getPERatio('VOO');
+  assert.equal(r.value, 23.81);
+  assert.equal(r.forward_pe, null);
+});
+
+test('getStockPB uses Tencent snapshot for PB/PE', async () => {
+  const fields = Array(88).fill('');
+  fields[3] = '7.26'; fields[39] = '8.28'; fields[46] = '0.88'; fields[64] = '3.58';
+  const text = `v_sh601288="${fields.join('~')}";`;
+  globalThis.fetch = async () => mockResponse(text);
+  const r = await new Fetcher().getStockPB('601288.SS');
+  assert.equal(r.value, 0.88);
+  assert.equal(r.pe, 8.28);
+  assert.equal(r.source, '腾讯财经');
+});
+
+test('getTencentTechnical parses day/qfqday rows and computes MA200', async () => {
+  const rows = [];
+  for (let i = 0; i < 250; i++) {
+    const close = 10 + i * 0.01;
+    rows.push([`2025-01-${(i % 28) + 1}`, String(close), String(close), String(close + 0.1), String(close - 0.1), '1000']);
+  }
+  globalThis.fetch = async () => mockResponse({ data: { sh601288: { qfqday: rows } } });
+  const r = await new Fetcher().getTencentTechnical('601288.SS');
+  assert.equal(r.source, '腾讯财经 K线');
+  assert.ok(r.ma200_pct > 0);
+  assert.ok(r.pct_from_52w_high <= 0);
+});
+
+test('getTechnicalIndicators prefers Tencent K-line for A-shares', async () => {
+  const rows = [];
+  for (let i = 0; i < 250; i++) {
+    const close = 10 + i * 0.01;
+    rows.push([`2025-01-${(i % 28) + 1}`, String(close), String(close), String(close + 0.1), String(close - 0.1), '1000']);
+  }
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('yahoo')) return mockResponse({ chart: { result: [] } });
+    if (String(url).includes('gtimg.cn')) return mockResponse({ data: { sh601288: { qfqday: rows } } });
+    return mockResponse('', { status: 404 });
+  };
+  const r = await new Fetcher().getTechnicalIndicators('601288.SS');
+  assert.equal(r.source, '腾讯财经 K线');
+  assert.ok(r.ma200_pct != null);
+});
+
+test('getStockPB falls back to Eastmoney when Tencent is empty', async () => {
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('qt.gtimg.cn')) return mockResponse('v_sh601288="1~x~601288";');
+    if (String(url).includes('eastmoney')) return mockResponse({ data: { f43: 726, f92: 8.2765, f162: 806, f167: 89 } });
+    return mockResponse('', { status: 404 });
+  };
+  const r = await new Fetcher().getStockPB('601288.SS');
+  assert.equal(r.value, 0.88);
+  assert.equal(r.source, '东方财富');
+});
+
+test('getForwardPE scrapes StockAnalysis Forward PE row', async () => {
+  globalThis.fetch = async () => mockResponse('<table><tr><td>Forward PE</td><td class="x">19.80</td></tr></table>');
+  const r = await new Fetcher().getForwardPE('QQQ');
+  assert.equal(r.value, 19.8);
+  assert.equal(r.source, 'StockAnalysis.com');
+});
+
+test('getForwardPE returns null on missing row', async () => {
+  globalThis.fetch = async () => mockResponse('<table><tr><td>PE Ratio</td><td>26.46</td></tr></table>');
+  const r = await new Fetcher().getForwardPE('QQQ');
+  assert.equal(r.value, null);
+});
+
+test('getVIX3M reads ^VIX3M chart metadata', async () => {
+  globalThis.fetch = async () => mockResponse({
+    chart: { result: [{ meta: { regularMarketPrice: 18.4 }, indicators: { quote: [{ close: [17.9, 18.4] }] } }] },
+  });
+  const r = await new Fetcher().getVIX3M();
+  assert.equal(r.value, 18.4);
+  assert.equal(r.source, 'Yahoo Finance (^VIX3M)');
+});
+
+test('getVIX3M returns null value on network failure', async () => {
+  globalThis.fetch = async () => { throw new Error('network'); };
+  const r = await new Fetcher().getVIX3M();
+  assert.equal(r.value, null);
+});
+
+test('getBaaYield reads last non-empty FRED DBAA row', async () => {
+  globalThis.fetch = async () => mockResponse('observation_date,DBAA\n2026-11-07,5.18\n2026-11-10,5.21\n');
+  const r = await new Fetcher().getBaaYield();
+  assert.equal(r.value, 5.21);
+  assert.equal(r.source, 'FRED (DBAA)');
+});
+
+test('getBaaYield skips empty trailing rows', async () => {
+  globalThis.fetch = async () => mockResponse('observation_date,DBAA\n2026-11-07,5.18\n2026-11-10,\n');
+  const r = await new Fetcher().getBaaYield();
+  assert.equal(r.value, 5.18);
+});

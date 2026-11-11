@@ -95,10 +95,10 @@ async function fetchFreshData() {
   const start = Date.now();
   const targets = analyzer.getTargets();
 
-  const [vix, fearGreed, treasury, putCall, dxy, shillerPE, realYield, goldRealPct, dxyPct, copperPct, danjuan, jiuquan, csiH30269, csi930955] = await Promise.all([
-    fetcher.getVIX(), fetcher.getFearGreed(), fetcher.getTreasuryYield(),
+  const [vix, vix3m, fearGreed, treasury, putCall, dxy, shillerPE, realYield, baaYield, goldRealPct, dxyPct, copperPct, danjuan, jiuquan, csiH30269, csi930955] = await Promise.all([
+    fetcher.getVIX(), fetcher.getVIX3M(), fetcher.getFearGreed(), fetcher.getTreasuryYield(),
     fetcher.getPutCallRatio(), fetcher.getDXY(), fetcher.getShillerPE(),
-    fetcher.getRealYield10Y(),
+    fetcher.getRealYield10Y(), fetcher.getBaaYield(),
     fetcher.getGoldRealPricePercentile(), fetcher.getDXYPercentile(),
     fetcher.getCommodityPercentile('HG=F', 'COMEX铜'),
     fetcher.getDanjuanValuations(),
@@ -108,8 +108,9 @@ async function fetchFreshData() {
   ]);
 
   const globalData = {
-    vix, fear_greed: fearGreed, treasury_10y: treasury,
+    vix, vix3m, fear_greed: fearGreed, treasury_10y: treasury,
     put_call_ratio: putCall, dxy, shiller_pe: shillerPE,
+    baa_yield: baaYield,
     // 中国市场估值改由蛋卷数据提供（省出 Workers 子请求配额，免费版单次限50）
     cn_market: { shanghai_pe: null, csi300_pe: danjuan.map['沪深300']?.pe ?? null, source: danjuan.source },
     real_yield_10y: realYield, gold_real_pct: goldRealPct, dxy_pct: dxyPct,
@@ -129,6 +130,10 @@ async function fetchFreshData() {
   const peTargets = targets.filter(t => t.strategic && (t.indicators.includes('pe_composite') || t.indicators.includes('erp')));
   const peMap = {};
   await Promise.all(peTargets.map(async t => { peMap[t.id] = await fetcher.getPERatio(t.symbol, t.name); }));
+  // Forward PE 只抓真正用到的标的（QQQ/VOO），Yahoo 对 ETF 不返回 forwardPE
+  const fwdTargets = targets.filter(t => t.strategic && t.indicators.includes('forward_pe'));
+  const fwdMap = {};
+  await Promise.all(fwdTargets.map(async t => { fwdMap[t.id] = await fetcher.getForwardPE(t.symbol); }));
   // 股息率/PB 仅抓取评分真正用到的标的，进一步省子请求配额
   const needDY = (t) => t.strategic && t.dy_source === 'td' && (t.indicators.includes('dy_spread_cn') || t.indicators.includes('div_yield_level'));
   const needPB = (t) => t.strategic && t.indicators.includes('stock_pb');
@@ -143,8 +148,12 @@ async function fetchFreshData() {
       name: targets[i].name, symbol: targets[i].symbol,
       // 中国个股的 PE 由东财 PB 请求顺带返回（f162），避免额外 Yahoo crumb 子请求
       pe_ratio: peMap[targets[i].id]?.value ?? pbResults[i]?.pe ?? null,
+      forward_pe: fwdMap[targets[i].id]?.value ?? peMap[targets[i].id]?.forward_pe ?? null,
+      forward_pe_data: fwdMap[targets[i].id] ?? null,
       pe_data: peMap[targets[i].id] ?? (pbResults[i]?.pe != null ? { value: pbResults[i].pe, source: '东方财富' } : null),
       stock_pe: pbResults[i]?.pe ?? null,
+      pb_source: pbResults[i]?.source ?? null,
+      dividend_data: divResults[i] ?? null,
       dividend_yield: divResults[i].value, pb: pbResults[i].value,
     };
   }
