@@ -110,10 +110,11 @@ async function setCache(env, data, fetchedAt) {
 }
 
 // 每日评分快照（只在 7:30 cron 调用；每个标的每天一行，INSERT OR REPLACE 防重复）
+// 返回写入行数（跳过/失败返回 0），供 cron 日志记录
 export async function saveScoreHistory(env, data, dateOverride) {
-  if (!env?.nasdaq_cache) return;
+  if (!env?.nasdaq_cache) return 0;
   const rows = data?.analysis?.results ?? [];
-  if (!rows.length) return;
+  if (!rows.length) return 0;
   // 用 UTC+8 日期，与用户看到的"今天"一致
   const date = dateOverride || new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
   try {
@@ -128,8 +129,10 @@ export async function saveScoreHistory(env, data, dateOverride) {
     // 保留一年
     await env.nasdaq_cache.prepare('DELETE FROM score_history WHERE date < ?')
       .bind(new Date(Date.now() - 365 * 86400000 + 8 * 3600 * 1000).toISOString().slice(0, 10)).run();
+    return rows.length;
   } catch (e) {
     console.error('score history write error:', e.message);
+    return 0;
   }
 }
 
@@ -138,12 +141,17 @@ async function fetchFreshData(env) {
   const start = Date.now();
   const targets = analyzer.getTargets();
 
+  // 慢变量（月线/周线/月度数据）走 D1 缓存：免费版 50 子请求上限，这些指标一天内几乎不变
+  const cached = (key, ttl, fn) => fetcher.getCachedDaily(env, key, ttl, fn);
   const [vix, vix3m, fearGreed, treasury, putCall, dxy, shillerPE, realYield, baaYield, goldRealPct, dxyPct, copperPct, danjuan, jiuquan, csiH30269, csi930955] = await Promise.all([
     fetcher.getVIX(), fetcher.getVIX3M(), fetcher.getFearGreed(), fetcher.getTreasuryYield(),
-    fetcher.getPutCallRatio(), fetcher.getDXY(), fetcher.getShillerPE(),
-    fetcher.getRealYield10Y(), fetcher.getBaaYield(env),
-    fetcher.getGoldRealPricePercentile(), fetcher.getDXYPercentile(),
-    fetcher.getCommodityPercentile('HG=F', 'COMEX铜'),
+    fetcher.getPutCallRatio(), fetcher.getDXY(),
+    cached('shiller_pe', 24, () => fetcher.getShillerPE()),
+    cached('real_yield_10y', 12, () => fetcher.getRealYield10Y()),
+    cached('baa_yield', 12, () => fetcher.getBaaYield(env)),
+    cached('gold_real_pct', 24, () => fetcher.getGoldRealPricePercentile()),
+    cached('dxy_pct', 24, () => fetcher.getDXYPercentile()),
+    cached('copper_pct', 24, () => fetcher.getCommodityPercentile('HG=F', 'COMEX铜')),
     fetcher.getDanjuanValuations(),
     fetcher.getJiuquanValuations(),
     fetcher.getCSIIndexValuation('H30269'),
@@ -151,7 +159,7 @@ async function fetchFreshData(env) {
   ]);
 
   // Forward PE 历史序列（NDX/SPX 各一次，动态分位用；失败时 analyzer 回退静态锚点表）
-  const [fwdHistNdx, fwdHistSpx] = await Promise.all([fetcher.getForwardPEHistory('ndx'), fetcher.getForwardPEHistory('spx')]);
+  const [fwdHistNdx, fwdHistSpx] = await Promise.all([fetcher.getForwardPEHistory('ndx', env), fetcher.getForwardPEHistory('spx', env)]);
 
   const globalData = {
     vix, vix3m, fear_greed: fearGreed, treasury_10y: treasury,
@@ -173,6 +181,9 @@ async function fetchFreshData(env) {
   const targetsData = {};
   const results = [];
 
+  // A股批量快照先行：1 次请求覆盖全部 A 股的 PB/PE/股息率（免费版 50 子请求上限）
+  const cnSymbols = targets.filter(t => /\.(SS|SZ)$/.test(t.symbol)).map(t => t.symbol);
+  if (cnSymbols.length) await fetcher.prefetchTencentQuotes(cnSymbols);
   // PE 仅抓取真正依赖 td.pe_ratio 的标的（QQQ/VOO）——Workers 免费版单次调用限 50 个子请求，
   // Yahoo PE 的 crumb 流程每个最多耗 3 个，其余标的估值已由蛋卷/腾讯/东财覆盖
   const peTargets = targets.filter(t => t.strategic && (t.indicators.includes('pe_composite') || t.indicators.includes('erp')));
@@ -211,11 +222,15 @@ async function fetchFreshData(env) {
     };
   }
 
+  // A股技术指标（日线，收盘后不变）缓存 8h：7:30 抓当日收盘后，14:30 复用；美股每日重抓
+  const techCN = (symbol) => /\.(SS|SZ)$/.test(symbol)
+    ? fetcher.getCachedDaily(env, 'tech_' + symbol, 8, () => fetcher.getTechnicalIndicators(symbol), r => r && r.current_price != null)
+    : fetcher.getTechnicalIndicators(symbol);
   for (const t of targets) {
-    let tech = await fetcher.getTechnicalIndicators(t.symbol);
+    let tech = await techCN(t.symbol);
     if (t.tech_symbol && t.tech_symbol !== t.symbol) {
       // 某些指数（如930955）Yahoo只有最新点位、没有历史K线：用跟踪同一指数的ETF补MA200/回撤
-      const proxy = await fetcher.getTechnicalIndicators(t.tech_symbol);
+      const proxy = await techCN(t.tech_symbol);
       tech = { ...proxy, current_price: tech.current_price ?? proxy.current_price, source: `${tech.source} / 技术代理 ${t.tech_symbol}` };
     }
     targetsData[t.id].current_price = tech.current_price;
@@ -511,8 +526,13 @@ export default {
         await setCache(env, freshData, freshData.fetched_at);
         // 7:30 记录每日评分快照（美股前收盘 + A股前一交易日收盘，均为完整数据）
         if (cron === '30 7 * * *') {
-          await saveScoreHistory(env, freshData);
-          console.log('[Scheduler] 评分快照已记录');
+          const written = await saveScoreHistory(env, freshData);
+          console.log(`[Scheduler] 评分快照已记录: ${written} 行`);
+          await fetcher.setValuationCache(env, 'cron:last_730', {
+            status: 'ok', at: new Date().toISOString(),
+            targets: freshData.analysis?.results?.length ?? 0,
+            history_rows: written, fetch_seconds: freshData.fetch_time_seconds,
+          });
         }
         // 银行个股 PB 历史分位：每日 D1 缓存刷新（refresh 流程只读缓存，不占子请求配额）
         try {
@@ -524,6 +544,8 @@ export default {
         console.log(`[Scheduler] 数据抓取完成，耗时 ${freshData.fetch_time_seconds}s`);
       } catch (e) {
         console.error(`[Scheduler] 抓取失败: ${e.message}`);
+        // 失败日志写 D1，便于事后诊断（valuation_cache 不入账子请求额度）
+        try { await fetcher.setValuationCache(env, 'cron:last_error', { status: 'error', at: new Date().toISOString(), cron, error: String(e?.message || e).slice(0, 300) }); } catch {}
       }
     }
   },

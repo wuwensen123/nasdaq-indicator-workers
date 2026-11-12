@@ -95,6 +95,24 @@ export class Fetcher {
     } catch {}
   }
 
+  // ========== 慢变量 D1 缓存（Workers 免费版 50 子请求上限：月线/周线数据不必每次重抓） ==========
+  // isOk 判断结果是否值得缓存（默认：有数值 value / 非空 map / csi pe1）；失败结果不缓存
+  async getCachedDaily(env, key, ttlHours, fn, isOk) {
+    const d1Key = 'daily:' + key;
+    if (env?.nasdaq_cache) {
+      const cached = await this.getValuationCache(env, d1Key);
+      if (cached?.data && cached.fetched_at && Date.now() - new Date(cached.fetched_at).getTime() < ttlHours * 3600 * 1000) {
+        return cached.data;
+      }
+    }
+    const fresh = await fn();
+    const ok = isOk
+      ? isOk(fresh)
+      : (fresh && (typeof fresh.value === 'number' || (fresh.map && Object.keys(fresh.map).length > 0) || fresh.pe1 != null));
+    if (env?.nasdaq_cache && ok) await this.setValuationCache(env, d1Key, fresh);
+    return fresh;
+  }
+
   // ========== 银行个股 PB 历史分位（东方财富估值分析，2018 至今，每日一条） ==========
   // 之前 pb_pct_hist 用中证银行指数分位（四行共享），这里换成分股自身历史序列
   static get BANK_EM_CODES() { return { abc_bank: '601288', ccb_bank: '601939', cmb_bank: '600036' }; }
@@ -180,11 +198,20 @@ export class Fetcher {
     });
   }
 
-  // 抓取并缓存 6h；失败返回 null（analyzer 回退静态锚点表）
-  async getForwardPEHistory(series) {
+  // 抓取并缓存：内存 6h + D1 12h（cron 冷启动/多 isolate 时省子请求）；失败返回 null（analyzer 回退静态锚点表）
+  async getForwardPEHistory(series, env) {
     const key = series === 'ndx' ? 'ndx' : 'spx';
     if (this._fwdHistCache?.[key] && Date.now() - this._fwdHistCache[key].ts < 6 * 3600 * 1000) {
       return this._fwdHistCache[key].data;
+    }
+    // D1 缓存：序列日更，12h 内直接复用（HTTP refresh 不再重复抓）
+    const d1Key = 'fwd_pe_hist:' + key;
+    if (env?.nasdaq_cache) {
+      const cached = await this.getValuationCache(env, d1Key);
+      if (cached?.data?.series?.length && cached.fetched_at && Date.now() - new Date(cached.fetched_at).getTime() < 12 * 3600 * 1000) {
+        this._fwdHistCache = { ...(this._fwdHistCache || {}), [key]: { ts: Date.now(), data: cached.data } };
+        return cached.data;
+      }
     }
     try {
       const url = `https://historyofmarket.com/api/${key === 'ndx' ? 'ndx' : 'sp500'}/forward-pe.json`;
@@ -197,6 +224,7 @@ export class Fetcher {
       };
       if (!seriesData.series.length) return null;
       this._fwdHistCache = { ...(this._fwdHistCache || {}), [key]: { ts: Date.now(), data: seriesData } };
+      if (env?.nasdaq_cache) await this.setValuationCache(env, d1Key, seriesData);
       return seriesData;
     } catch { return null; }
   }
@@ -371,22 +399,14 @@ export class Fetcher {
   }
 
   // ========== 10年期TIPS实际收益率（黄金的机会成本锚） ==========
-  // 主源 FRED DFII10；Workers 出口对 FRED 会收到 HTTP 520，兜底用美国财政部官方 XML
+  // 只用美国财政部官方 XML：FRED CSV 在 Workers 出口必 520（实测），不再白耗 1 个子请求
   async getRealYield10Y() {
-    try {
-      const csv = await fetch('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFII10', { headers: { 'User-Agent': UA_PLAIN } }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); });
-      const lines = csv.trim().split('\n');
-      for (let i = lines.length - 1; i >= 1; i--) {
-        const v = parseFloat(lines[i].split(',')[1]);
-        if (!isNaN(v)) return { value: round(v), source: 'FRED (DFII10)', updated_at: now() };
-      }
-    } catch {}
     try {
       const xml = await fetch('https://home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_real_yield_curve&field_tdr_date_value=' + new Date().getUTCFullYear(), { headers: { 'User-Agent': UA_PLAIN } }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); });
       const vals = [...xml.matchAll(/<d:TC_10YEAR[^>]*>([0-9.\-]+)</g)].map(m => parseFloat(m[1])).filter(v => !isNaN(v));
       if (vals.length) return { value: round(vals[vals.length - 1]), source: 'Treasury.gov', updated_at: now() };
     } catch {}
-    return { value: null, source: 'FRED+Treasury均失败', updated_at: now() };
+    return { value: null, source: 'Treasury.gov 失败', updated_at: now() };
   }
 
   // ========== 穆迪Baa公司债收益率（EY spread vs Baa，JPM估值表口径） ==========
@@ -412,18 +432,8 @@ export class Fetcher {
   }
 
   // ========== 黄金实际价格历史分位（GC=F月线 ÷ CPI，黄金的"CAPE"） ==========
-  // CPI 主源 FRED；Workers 出口 520 时兜底 multpl.com 月度 CPI 表
+  // CPI 只用 multpl.com 月度表：FRED CSV 在 Workers 出口必 520（实测），不再白耗 1 个子请求
   async getCpiMap() {
-    try {
-      const csv = await fetch('https://fred.stlouisfed.org/graph/fredgraph.csv?id=CPIAUCSL', { headers: { 'User-Agent': UA_PLAIN } }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); });
-      const map = new Map();
-      for (const line of csv.trim().split('\n').slice(1)) {
-        const [d, v] = line.split(',');
-        const c = parseFloat(v);
-        if (!isNaN(c)) map.set(d.slice(0, 7), c);
-      }
-      if (map.size > 120) return map;
-    } catch {}
     try {
       const html = await fetchText('https://www.multpl.com/cpi/table/by-month');
       const M = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' };
@@ -564,6 +574,34 @@ export class Fetcher {
   }
 
   // ========== 腾讯A股快照（一次请求同时拿 PB/PE/股息率/价格） ==========
+  // 批量预取：q=sh600036,sh601288,... 一次请求覆盖全部 A 股，省逐个请求（免费版 50 子请求上限）
+  async prefetchTencentQuotes(symbols) {
+    this._txQuoteCache = this._txQuoteCache || {};
+    const todo = symbols.filter(s => this._txQuoteCache[s] === undefined);
+    if (!todo.length) return;
+    try {
+      const q = todo.map(s => (s.endsWith('.SS') ? 'sh' : 'sz') + s.replace(/\.(SS|SZ)$/, '')).join(',');
+      const text = await fetchText('https://qt.gtimg.cn/q=' + q);
+      const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+      for (const m of text.matchAll(/v_((?:sh|sz)\d+)="([^"]*)"/g)) {
+        const code = m[1];
+        const symbol = (code.startsWith('sh') ? code.slice(2) + '.SS' : code.slice(2) + '.SZ');
+        const parts = m[2].split('~');
+        if (parts.length < 65) { this._txQuoteCache[symbol] = null; continue; }
+        this._txQuoteCache[symbol] = {
+          price: num(parts[3]),
+          pe: num(parts[39]),
+          pb: num(parts[46]),
+          dividend_yield: num(parts[64]),
+        };
+      }
+      // 响应中缺失的标的标记 null（后续走东财/估算兜底，不再逐个重试）
+      for (const s of todo) if (this._txQuoteCache[s] === undefined) this._txQuoteCache[s] = null;
+    } catch {
+      // 批量失败不写缓存，留给 getTencentQuote 逐个兜底
+    }
+  }
+
   // 同一次 refresh 内 getPERatio/getStockPB/getDividendYield 共用，省子请求
   async getTencentQuote(symbol) {
     this._txQuoteCache = this._txQuoteCache || {};
