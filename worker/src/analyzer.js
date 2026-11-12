@@ -784,45 +784,70 @@ export class Analyzer {
     return names[k] || k;
   }
   _indInfo(k) {
+    // direction: 'low'=数值越低对定投买入越有利（贵度指标），'high'=越高越有利（便宜度指标），
+    // 'mid'=区间适中为好（区间型），'none'=无单边方向（情绪参考，不参与战略评分）
     const infos = {
-      vix: { name: 'VIX波动率', desc: '衡量市场恐慌程度，越高越恐慌' },
-      fear_greed: { name: '恐惧与贪婪指数', desc: '市场情绪，越高越贪婪' },
-      put_call: { name: '看跌/看涨期权比率', desc: '期权市场情绪，越低越乐观' },
-      yield_10y: { name: '10年期国债收益率', desc: '无风险利率，越高越紧缩' },
-      dxy: { name: '美元指数DXY', desc: '美元强弱，越强越不利于风险资产' },
-      pe_qqq: { name: '纳斯达克100市盈率', desc: '估值水平，越高越贵' },
-      pe_sp500: { name: '标普500市盈率', desc: '估值水平，越高越贵' },
-      pe_hsi: { name: '恒生指数市盈率', desc: '估值水平，越高越贵' },
-      pe_shanghai: { name: '上证指数市盈率', desc: 'A股整体估值水平' },
-      pe_csi300: { name: '沪深300市盈率', desc: '大盘股估值水平' },
-      pe_stock: { name: '银行股市盈率', desc: '银行股估值水平' },
-      pe_utility: { name: '电力股市盈率', desc: '电力行业估值水平' },
-      pe_mining: { name: '矿业股市盈率', desc: '矿业行业估值水平' },
-      dividend_yield: { name: '股息率', desc: '分红收益率，越高越适合定投（参考华尔街红利策略）' },
-      rsi: { name: 'RSI(14)相对强弱指标', desc: '技术指标，越高越超买' },
-      ma200: { name: '200日均线偏离度', desc: '价格相对于200日均线的位置' },
-      pe_composite: { name: 'PE综合估值', desc: '市盈率历史分位（trailing口径），长期估值主锚；Forward PE单独列示，二者互补' },
-      cape: { name: 'CAPE周期调整市盈率', desc: '美股10年平滑估值（S&P口径），跨周期不可操纵的长周期锚，分数≈历史分位' },
-      erp: { name: '股权风险溢价ERP', desc: '盈利收益率−10年期国债收益率：持有股票相对无风险债权的补偿' },
-      erp_real: { name: '实际股权风险溢价', desc: '盈利收益率−10年TIPS实际利率：剔除通胀后的股票相对债券补偿；负值=债券占优' },
-      ma200_risk: { name: '200日趋势风控', desc: 'Faber均线证据：价格越低于200日均线，回撤风险越高，作为风险评分项' },
-      real_yield: { name: '10年TIPS实际利率', desc: '无现金流/长久期资产的机会成本（FRED DFII10）；实际利率越高，黄金与成长股估值压力越大' },
-      gold_real_pct: { name: '黄金实际价格分位', desc: '金价÷CPI后的50年历史分位——无现金流资产的长周期估值锚' },
-      dxy_pct: { name: '美元指数5年分位', desc: '美元越强，以美元计价的黄金越承压（反向驱动）' },
-      pe_pct_hist: { name: 'PE历史分位', desc: '指数市盈率历史分位（韭圈儿/蛋卷基金口径，10年或上市以来），估值主锚' },
-      pb_pct_hist: { name: 'PB历史分位', desc: '银行股用个股自身历史分位（东方财富2018至今）；其他用韭圈儿/蛋卷指数口径' },
-      forward_pe: { name: 'Forward P/E', desc: '未来12个月预期市盈率（historyofmarket.com 周度terminal+日度forwardOwn 同口径合并，与分位序列同源；交叉验证：JPM 2026-09-30 S&P 19.0x、StockAnalysis QQQ 20.57x）' },
-      ey_spread_baa: { name: 'EY spread vs Baa', desc: '盈利收益率−穆迪Baa公司债收益率（JPM估值表口径）；Baa优先FRED DBAA，失败时用JPM 2026-09-30隐含6.26%+10Y调整；负值=股票相对信用债偏贵' },
-      erp_hk: { name: '港股ERP', desc: '盈利收益率−美债10Y（港币联系汇率下美债即港股无风险利率），中金口径' },
-      div_yield_level: { name: '股息率水平', desc: '股息率相对其历史区间的位置；仅作carry交叉验证，单一高股息可能是陷阱（Morgan Stanley）' },
-      dy_spread_cn: { name: '股债利差', desc: '股息率−中国10Y国债（中金红利策略核心标尺，国债用静态锚点季度校准），越高红利越便宜' },
-      dy_carry: { name: '股息率(股债利差)', desc: '红利策略的收益来源：优先显示中证官方D/P2股息率，按股息率−中国10Y国债评分；派息率>75%时触发高息陷阱保护，高息不加分' },
-      stock_pb: { name: '个股PB水平', desc: '个股市净率在其历史区间锚点表中的位置——银行/水电/周期股的估值主锚' },
-      roe_level: { name: 'ROE质量估值(PB-ROE)', desc: 'ROE=PB/PE（价格中性）；实际PB低于ROE×合理PE隐含的PB=质量调整后便宜' },
-      payout_ratio: { name: '派息率可持续性', desc: '派息率=股息率×PE（价格中性）；30-60%健康，>75%可持续性风险，<20%红利支撑弱' },
-      copper_pct: { name: '铜价10年分位', desc: 'COMEX铜价10年周线分位——周期股的周期位置锚，高分=周期顶部风险（紫金PE是反向指标，不参与评分）' },
+      vix: { name: 'VIX波动率', direction: 'low', desc: '波动率：衡量市场恐慌程度。越高=市场越恐慌。对买入而言 VIX 高常伴随低估值窗口，但本身是压力信号（本系统只把 VIX/VIX3M>1.15 作为小额加速确认）。越低=市场平静' },
+      vix_ratio: { name: 'VIX/VIX3M', direction: 'high', desc: '近月(VIX)÷3月远期(VIX3M)波动率比值，反映期限结构。>1.15 = 近月恐慌高于远期（倒挂），短期压力确认信号 → 触发加速部分 ×1.15；≤1.15 = 期限结构正常，无信号' },
+      fear_greed: { name: '恐惧与贪婪指数', direction: 'low', desc: 'CNN 恐惧与贪婪指数（0-100）：越低越恐惧。≤25 极度恐惧区触发 1.25 倍加速买入（恐慌期坚持定投）；≥75 极度贪婪区降速至 0.75 倍' },
+      put_call: { name: '看跌/看涨期权比率', direction: 'low', desc: '期权市场情绪：全市场看跌期权成交量 ÷ 看涨期权。越高=对冲盘越多=悲观；越低=乐观。本系统仅展示参考，不直接触发买卖（F&G 已覆盖情绪面）' },
+      yield_10y: { name: '10年期国债收益率', direction: 'low', desc: '无风险利率，越高越紧缩' },
+      dxy: { name: '美元指数DXY', direction: 'low', desc: '美元强弱，越强越不利于风险资产' },
+      pe_qqq: { name: '纳斯达克100市盈率', direction: 'low', desc: '估值水平，越高越贵' },
+      pe_sp500: { name: '标普500市盈率', direction: 'low', desc: '估值水平，越高越贵' },
+      pe_hsi: { name: '恒生指数市盈率', direction: 'low', desc: '估值水平，越高越贵' },
+      pe_shanghai: { name: '上证指数市盈率', direction: 'low', desc: 'A股整体估值水平' },
+      pe_csi300: { name: '沪深300市盈率', direction: 'low', desc: '大盘股估值水平' },
+      pe_stock: { name: '银行股市盈率', direction: 'low', desc: '银行股估值水平' },
+      pe_utility: { name: '电力股市盈率', direction: 'low', desc: '电力行业估值水平' },
+      pe_mining: { name: '矿业股市盈率', direction: 'low', desc: '矿业行业估值水平' },
+      dividend_yield: { name: '股息率', direction: 'high', desc: '分红收益率，越高越适合定投（参考华尔街红利策略）' },
+      rsi: { name: 'RSI(14)相对强弱指标', direction: 'low', desc: '技术指标，越高越超买' },
+      ma200: { name: '200日均线偏离度', direction: 'high', desc: '价格相对于200日均线的位置，越高趋势越强' },
+      pe_composite: { name: 'PE综合估值', direction: 'low', desc: '市盈率历史分位（trailing口径），长期估值主锚；分位越低=越便宜。Forward PE单独列示，二者互补' },
+      cape: { name: 'CAPE周期调整市盈率', direction: 'low', desc: '美股10年平滑估值（S&P口径），跨周期不可操纵的长周期锚，分数≈历史分位。越低=长期估值越便宜' },
+      erp: { name: '股权风险溢价ERP', direction: 'high', desc: '盈利收益率−10年期国债收益率：持有股票相对无风险债权的补偿。越高=股票越便宜' },
+      erp_real: { name: '实际股权风险溢价', direction: 'high', desc: '盈利收益率−10年TIPS实际利率：剔除通胀后的股票相对债券补偿；负值=债券占优，越高=越便宜' },
+      ma200_risk: { name: '200日趋势风控', direction: 'high', desc: 'Faber均线风控：价格在200日均线上方越多（正值越大）趋势越安全；跌破均线越深（负值越大）回撤风险越高、风控分越高' },
+      real_yield: { name: '10年TIPS实际利率', direction: 'low', desc: '无现金流/长久期资产的机会成本（FRED DFII10）；实际利率越高，黄金与成长股估值压力越大' },
+      gold_real_pct: { name: '黄金实际价格分位', direction: 'low', desc: '金价÷CPI后的50年历史分位——无现金流资产的长周期估值锚。分位越低=金价相对历史越便宜' },
+      dxy_pct: { name: '美元指数5年分位', direction: 'low', desc: '美元越强，以美元计价的黄金越承压（反向驱动）' },
+      pe_pct_hist: { name: 'PE历史分位', direction: 'low', desc: '指数市盈率历史分位（韭圈儿/蛋卷基金口径，10年或上市以来），估值主锚。越低=越便宜' },
+      pb_pct_hist: { name: 'PB历史分位', direction: 'low', desc: '银行股用个股自身历史分位（东方财富2018至今）；其他用韭圈儿/蛋卷指数口径。越低=越便宜' },
+      forward_pe: { name: 'Forward P/E', direction: 'low', desc: '未来12个月预期市盈率（historyofmarket.com 周度terminal+日度forwardOwn 同口径合并，与分位序列同源）。越低=未来盈利预期下估值越便宜（交叉验证：JPM 2026-09-30 S&P 19.0x、StockAnalysis QQQ 20.57x）' },
+      ey_spread_baa: { name: 'EY spread vs Baa', direction: 'high', desc: '盈利收益率−穆迪Baa公司债收益率（JPM估值表口径）。越高=股票相对信用债越便宜；负值=股票相对信用债偏贵。（Baa优先FRED DBAA，失败时用JPM隐含6.26%+10Y调整）' },
+      erp_hk: { name: '港股ERP', direction: 'high', desc: '盈利收益率−美债10Y（港币联系汇率下美债即港股无风险利率），中金口径。越高=港股越便宜' },
+      div_yield_level: { name: '股息率水平', direction: 'high', desc: '股息率相对其历史区间的位置。越高=越便宜；仅作carry交叉验证，单一高股息可能是陷阱（Morgan Stanley）' },
+      dy_spread_cn: { name: '股债利差', direction: 'high', desc: '股息率−中国10Y国债（中金红利策略核心标尺，国债用静态锚点季度校准），越高红利越便宜' },
+      dy_carry: { name: '股息率(股债利差)', direction: 'high', desc: '红利策略的收益来源：优先显示中证官方D/P2股息率，按股息率−中国10Y国债评分。越高=越便宜；派息率>75%时触发高息陷阱保护，高息不加分' },
+      stock_pb: { name: '个股PB水平', direction: 'low', desc: '个股市净率在其历史区间锚点表中的位置——银行/水电/周期股的估值主锚。越低=越便宜' },
+      roe_level: { name: 'ROE质量估值(PB-ROE)', direction: 'low', desc: 'ROE=PB/PE（价格中性盈利力）；实际PB低于ROE×合理PE隐含的PB=质量调整后便宜（比值越低越便宜）' },
+      payout_ratio: { name: '派息率可持续性', direction: 'mid', desc: '派息率=股息率×PE（价格中性）。30-60%为健康区间；>75%有可持续性风险（高分预警）；<20%红利支撑弱' },
+      copper_pct: { name: '铜价10年分位', direction: 'low', desc: 'COMEX铜价10年周线分位——周期股的周期位置锚。分位越低=越接近周期底部；高分=周期顶部风险（紫金PE是反向指标，不参与评分）' },
     };
-    return infos[k] || { name: k, desc: '' };
+    return infos[k] || { name: k, desc: '', direction: 'none' };
+  }
+
+  // 指标中文名 → {direction, desc}：供 /api/history indicator_meta 与前端解释区
+  getIndicatorMeta(name) {
+    return this.getIndicatorMetaAll()?.get(name) || null;
+  }
+
+  // 全量指标元数据（中文名 → {direction, desc}）
+  getIndicatorMetaAll() {
+    if (!this._metaByCnName) {
+      const map = new Map();
+      for (const key of ['vix', 'vix_ratio', 'fear_greed', 'put_call', 'yield_10y', 'dxy', 'pe_qqq', 'pe_sp500', 'pe_hsi', 'pe_shanghai',
+        'pe_csi300', 'pe_stock', 'pe_utility', 'pe_mining', 'dividend_yield', 'rsi', 'ma200', 'pe_composite', 'cape',
+        'erp', 'erp_real', 'ma200_risk', 'real_yield', 'gold_real_pct', 'dxy_pct', 'pe_pct_hist', 'pb_pct_hist',
+        'forward_pe', 'ey_spread_baa', 'erp_hk', 'div_yield_level', 'dy_spread_cn', 'dy_carry', 'stock_pb',
+        'roe_level', 'payout_ratio', 'copper_pct']) {
+        const info = this._indInfo(key);
+        if (info && info.name) map.set(info.name, { direction: info.direction ?? 'none', desc: info.desc });
+      }
+      this._metaByCnName = map;
+    }
+    return this._metaByCnName;
   }
 }
 

@@ -135,6 +135,24 @@ test('GET /api/history returns per-indicator series with value and score', async
   assert.deepEqual(body.history.voo.indicators, {});
 });
 
+test('GET /api/history returns indicator_meta with direction and desc', async () => {
+  const { env } = mockD1({
+    historyRows: [
+      {
+        target_id: 'qqq', date: '2026-11-11', composite_score: 64.1, multiple: 1,
+        indicators: JSON.stringify({ 'PE综合估值': { v: 28.4, s: 68 }, 'VIX波动率': { v: 19.1, s: null } }),
+      },
+    ],
+  });
+  const res = await worker.fetch(new Request('https://x/api/history?days=90'), env, { waitUntil() {} });
+  const body = await res.json();
+  assert.equal(body.indicator_meta['PE综合估值'].direction, 'low');
+  assert.ok(body.indicator_meta['PE综合估值'].desc.includes('便宜'));
+  assert.equal(body.indicator_meta['VIX波动率'].direction, 'low');
+  assert.equal(body.indicator_meta['实际股权风险溢价'].direction, 'high'); // 未出现的指标也应在元数据表内
+  assert.equal(body.indicator_meta['派息率可持续性'].direction, 'mid');
+});
+
 test('GET /api/history returns empty object when table missing', async () => {
   const env = {
     nasdaq_cache: {

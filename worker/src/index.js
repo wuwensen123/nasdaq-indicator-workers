@@ -313,7 +313,11 @@ export default {
             (h.indicators[name] ||= []).push({ date: row.date, v: iv.v ?? null, s: iv.s ?? null });
           }
         }
-        return json({ success: true, days, history });
+        // 指标元数据（方向 + 解释）全量表：供前端按钮角标与解释区
+        const indicator_meta = Object.fromEntries(
+          [...analyzer.getIndicatorMetaAll().entries()].map(([name, m]) => [name, m])
+        );
+        return json({ success: true, days, history, indicator_meta });
       } catch (e) {
         // 表尚未建立（首次部署）时返回空历史，不阻塞前端
         return json({ success: true, days, history: {}, note: 'score_history 尚未建立' });

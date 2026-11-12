@@ -363,6 +363,7 @@ function showTargetDetail(targetId) {
           <canvas id="scoreHistoryChart"></canvas>
           <div id="scoreHistoryEmpty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:0.82rem;color:var(--text-secondary);"></div>
         </div>
+        <div id="indicatorExplain" class="mt-2" style="background:rgba(37,99,235,0.04);border:1px solid var(--border-color);border-radius:8px;padding:8px 10px;"></div>
       </div>`;
 
     const t = target.tactical;
@@ -390,19 +391,28 @@ function showTargetDetail(targetId) {
 }
 
 // ===== 90 天评分趋势图 =====
-let _historyCache = null, _historyTs = 0;
+let _historyCache = null, _historyTs = 0, _historyMeta = null;
 async function loadAndRenderHistory(targetId) {
   try {
     if (!_historyCache || Date.now() - _historyTs > 5 * 60 * 1000) {
       const res = await fetch(`${appState.apiBase}/history?days=90`);
       const j = await res.json();
       _historyCache = j.history || {};
+      _historyMeta = j.indicator_meta || {};
       _historyTs = Date.now();
     }
   } catch { _historyCache = _historyCache || {}; }
   renderScoreHistory(targetId);
 }
 let _selIndicator = {}; // targetId -> 所选指标（默认综合评分）
+// 指标方向：'low'=越低越好 'high'=越高越好 'mid'=适中为好 'none'=仅参考
+const DIR_INFO = {
+  low:  { label: '越低越好', color: '#16a34a', icon: '↓' },
+  high: { label: '越高越好', color: '#16a34a', icon: '↑' },
+  mid:  { label: '适中为好', color: '#b45309', icon: '~' },
+  none: { label: '', color: '', icon: '' },
+};
+const SCORE_EXPLAIN = '综合评分 = 各估值/质量/趋势指标按其权重加权，0=非常便宜 → 100=非常贵；评分≤40、PE分位≤40% 或距 52 周高点回撤≥15% 时触发 1.5x/2x/3x 加速定投，估值极端高位时不加速。';
 
 function renderScoreHistory(targetId) {
   const canvas = document.getElementById('scoreHistoryChart');
@@ -417,14 +427,31 @@ function renderScoreHistory(targetId) {
   const options = ['综合评分', ...names];
   const sel = _selIndicator[targetId] || '综合评分';
   if (tabs) {
-    tabs.innerHTML = options.map(n =>
-      `<button type="button" class="hist-tab${n === sel ? ' active' : ''}" data-tab="${n}" style="border:1px solid var(--border-color);background:${n === sel ? '#2563eb' : 'rgba(0,0,0,0.03)'};color:${n === sel ? '#fff' : 'var(--text-primary)'};border-radius:12px;padding:2px 10px;font-size:0.74rem;cursor:pointer;">${n}</button>`
-    ).join('');
+    tabs.innerHTML = options.map(n => {
+      // 按钮右上角方向角标：综合评分固定「越低越好」（分数低=便宜）；其余取元数据 direction
+      const d = n === '综合评分' ? 'low' : (_historyMeta?.[n] || {}).direction || 'none';
+      const bi = DIR_INFO[d] || DIR_INFO.none;
+      const badge = bi.label ? `<span style="position:absolute;top:-6px;right:-4px;font-size:0.55rem;line-height:1.2;color:#fff;background:${bi.color};border-radius:8px;padding:0 4px;white-space:nowrap;">${bi.icon}${bi.label}</span>` : '';
+      return `<button type="button" class="hist-tab${n === sel ? ' active' : ''}" data-tab="${n}" style="position:relative;border:1px solid var(--border-color);background:${n === sel ? '#2563eb' : 'rgba(0,0,0,0.03)'};color:${n === sel ? '#fff' : 'var(--text-primary)'};border-radius:12px;padding:2px 10px;font-size:0.74rem;cursor:pointer;">${n}${badge}</button>`;
+    }).join('');
   }
   const isScore = sel === '综合评分';
   const points = isScore
     ? scoreSeries.map(p => ({ date: p.date, v: p.score, s: null }))
     : (indMap[sel] || []).filter(p => p.v !== null || p.s !== null);
+  // 当前选中指标的解释区（图表外部独立区域）
+  const explainEl = document.getElementById('indicatorExplain');
+  if (explainEl) {
+    const dir = isScore ? DIR_INFO.low : DIR_INFO[(_historyMeta?.[sel] || {}).direction || 'none'] || DIR_INFO.none;
+    const desc = isScore || !_historyMeta?.[sel]?.desc
+      ? SCORE_EXPLAIN
+      : _historyMeta[sel].desc;
+    explainEl.innerHTML = `<div style="font-size:0.8rem;color:var(--text-primary);line-height:1.5;">
+      <span style="font-weight:600;">${sel}</span>
+      ${dir.icon ? `<span style="display:inline-block;margin-left:6px;padding:0 6px;border-radius:8px;font-size:0.7rem;color:#fff;background:${dir.color};">${dir.icon} ${dir.label}</span>` : ''}
+      <div class="mt-1" style="font-size:0.74rem;color:var(--text-secondary);">${desc}</div>
+    </div>`;
+  }
   if (points.length < 2) {
     canvas.style.display = 'none';
     if (empty) {
