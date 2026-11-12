@@ -59,6 +59,18 @@ async function initDB(env) {
         updated_at TEXT NOT NULL
       )
     `).run();
+    await env.nasdaq_cache.prepare(`
+      CREATE TABLE IF NOT EXISTS score_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_id TEXT NOT NULL,
+        date TEXT NOT NULL,
+        composite_score REAL,
+        multiple REAL,
+        indicators TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(target_id, date)
+      )
+    `).run();
   } catch (e) {
     console.error('DB init error:', e.message);
   }
@@ -97,6 +109,30 @@ async function setCache(env, data, fetchedAt) {
   }
 }
 
+// 每日评分快照（只在 7:30 cron 调用；每个标的每天一行，INSERT OR REPLACE 防重复）
+export async function saveScoreHistory(env, data, dateOverride) {
+  if (!env?.nasdaq_cache) return;
+  const rows = data?.analysis?.results ?? [];
+  if (!rows.length) return;
+  // 用 UTC+8 日期，与用户看到的"今天"一致
+  const date = dateOverride || new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  try {
+    const stmts = rows.map((r) => {
+      const ind = {};
+      for (const i of r.indicators || []) ind[i.name] = { v: i.value, s: i.score };
+      return env.nasdaq_cache.prepare(
+        'INSERT OR REPLACE INTO score_history (target_id, date, composite_score, multiple, indicators) VALUES (?, ?, ?, ?, ?)'
+      ).bind(r.target_id, date, r.composite_score ?? null, r.strategy?.multiple ?? null, JSON.stringify(ind));
+    });
+    await env.nasdaq_cache.batch(stmts);
+    // 保留一年
+    await env.nasdaq_cache.prepare('DELETE FROM score_history WHERE date < ?')
+      .bind(new Date(Date.now() - 365 * 86400000 + 8 * 3600 * 1000).toISOString().slice(0, 10)).run();
+  } catch (e) {
+    console.error('score history write error:', e.message);
+  }
+}
+
 // 获取新鲜数据（实时抓取）
 async function fetchFreshData(env) {
   const start = Date.now();
@@ -113,6 +149,9 @@ async function fetchFreshData(env) {
     fetcher.getCSIIndexValuation('H30269'),
     fetcher.getCSIIndexValuation('930955'),
   ]);
+
+  // Forward PE 历史序列（NDX/SPX 各一次，动态分位用；失败时 analyzer 回退静态锚点表）
+  const [fwdHistNdx, fwdHistSpx] = await Promise.all([fetcher.getForwardPEHistory('ndx'), fetcher.getForwardPEHistory('spx')]);
 
   const globalData = {
     vix, vix3m, fear_greed: fearGreed, treasury_10y: treasury,
@@ -143,8 +182,6 @@ async function fetchFreshData(env) {
   const fwdTargets = targets.filter(t => t.strategic && t.indicators.includes('forward_pe'));
   const fwdMap = {};
   await Promise.all(fwdTargets.map(async t => { fwdMap[t.id] = await fetcher.getForwardPE(t.symbol); }));
-  // Forward PE 历史序列（NDX/SPX 各一次，动态分位用；失败时 analyzer 回退静态锚点表）
-  const [fwdHistNdx, fwdHistSpx] = await Promise.all([fetcher.getForwardPEHistory('ndx'), fetcher.getForwardPEHistory('spx')]);
   // 股息率/PB 仅抓取评分真正用到的标的，进一步省子请求配额
   const needDY = (t) => t.strategic && t.dy_source === 'td' && (t.indicators.includes('dy_spread_cn') || t.indicators.includes('div_yield_level'));
   const needPB = (t) => t.strategic && t.indicators.includes('stock_pb');
@@ -222,6 +259,26 @@ export default {
     // 健康检查
     if (path === '/api/health') {
       return json({ status: 'ok', server_time: new Date().toISOString() });
+    }
+
+    // 评分历史（90 天趋势）：一次返回全部标的，前端按需取用
+    if (path === '/api/history') {
+      const rawDays = parseInt(url.searchParams.get('days') || '90', 10);
+      const days = Math.min(Math.max(isNaN(rawDays) ? 90 : rawDays, 1), 365);
+      const since = new Date(Date.now() - days * 86400000 + 8 * 3600 * 1000).toISOString().slice(0, 10);
+      try {
+        const q = await env.nasdaq_cache.prepare(
+          'SELECT target_id, date, composite_score, multiple FROM score_history WHERE date >= ? ORDER BY date'
+        ).bind(since).all();
+        const history = {};
+        for (const row of q?.results ?? []) {
+          (history[row.target_id] ||= []).push({ date: row.date, score: row.composite_score, multiple: row.multiple });
+        }
+        return json({ success: true, days, history });
+      } catch (e) {
+        // 表尚未建立（首次部署）时返回空历史，不阻塞前端
+        return json({ success: true, days, history: {}, note: 'score_history 尚未建立' });
+      }
     }
 
     // 数据 API
@@ -452,6 +509,11 @@ export default {
       try {
         const freshData = await fetchFreshData(env);
         await setCache(env, freshData, freshData.fetched_at);
+        // 7:30 记录每日评分快照（美股前收盘 + A股前一交易日收盘，均为完整数据）
+        if (cron === '30 7 * * *') {
+          await saveScoreHistory(env, freshData);
+          console.log('[Scheduler] 评分快照已记录');
+        }
         // 银行个股 PB 历史分位：每日 D1 缓存刷新（refresh 流程只读缓存，不占子请求配额）
         try {
           const pb = await fetcher.refreshBankPbPercentiles(env);
