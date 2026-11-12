@@ -121,6 +121,14 @@ export async function saveScoreHistory(env, data, dateOverride) {
     const stmts = rows.map((r) => {
       const ind = {};
       for (const i of r.indicators || []) ind[i.name] = { v: i.value, s: i.score };
+      // 全局战术情绪指标（市场级，不参与战略评分；所有标的都存，供 90 天回溯）
+      const st = r.sentiment;
+      if (st) {
+        if (st.vix != null) ind['VIX波动率'] = { v: st.vix, s: null };
+        if (st.vix_ratio != null) ind['VIX/VIX3M'] = { v: st.vix_ratio, s: null };
+        if (st.fear_greed != null) ind['恐惧与贪婪指数'] = { v: st.fear_greed, s: null };
+        if (st.put_call != null) ind['看跌/看涨期权比率'] = { v: st.put_call, s: null };
+      }
       return env.nasdaq_cache.prepare(
         'INSERT OR REPLACE INTO score_history (target_id, date, composite_score, multiple, indicators) VALUES (?, ?, ?, ?, ?)'
       ).bind(r.target_id, date, r.composite_score ?? null, r.strategy?.multiple ?? null, JSON.stringify(ind));

@@ -169,17 +169,24 @@ export class Analyzer {
     const pos = this._marketPosition(composite);
     const accel = this._accelSignals(cfg, td, global);
     const base = this._strategy(composite, accel);
-    const tactical = cfg.tactical_fg === false ? null : this._tacticalSignals(global);
+    // 情绪快照对所有标的都算（供 90 天回溯），但只有 tactical_fg!==false 的标的参与倍数叠加
+    const tacRaw = this._tacticalSignals(global);
+    const tactical = cfg.tactical_fg === false ? null : tacRaw;
     const coeff = tactical?.coeff ?? 1;
     const reason = tactical?.reason ?? null;
     const strategy = this._capForCoverage(this._applyTactical(base, coeff, reason), totalWeight);
+    // 全局情绪指标（市场级，不进入战略评分）
+    const sentiment = {
+      vix: tacRaw.vix, vix3m: tacRaw.vix3m, vix_ratio: tacRaw.vix_ratio,
+      fear_greed: tacRaw.fear_greed, put_call: tacRaw.put_call,
+    };
 
     const fw = (k) => `${this._indName(k)}×${w[k] * 100}%`;
     const srcNote = this._valuationNote(cfg, global);
     return {
       target_id: cfg.id, target_name: cfg.name, target_type: cfg.type, symbol: cfg.symbol,
       current_price: td.current_price, composite_score: composite, market_position: pos.label,
-      position_color: pos.color, strategy, indicators, tactical,
+      position_color: pos.color, strategy, indicators, tactical, sentiment,
       data_coverage: round(totalWeight * 100, 0),
       formula: `战略评分 = ${cfg.indicators.map(fw).join(' + ')}｜倍数 = 1x底仓 + 估值/回撤加速${cfg.tactical_fg !== false ? `${coeff !== 1 ? ` × 情绪${coeff}` : ''}` : '（无情绪叠加）'}`,
       formula_detail: `十年定投双层架构：评分0=便宜→100=贵（估值/分位项≈历史分位）；定投倍数以1x为底仓，仅在综合评分≤40、PE分位≤40%或距52周高点回撤≥15%时加速（1.5x/2x/3x）；估值极端高位时回撤不加速（股票PE分位/银行PB分位/商品实际价格分位≥85%）；不暂停、不减仓，1x底仓不因贪婪减速；数据覆盖<90%时强制维持1x，不加速。依据：Vanguard定投现金拖累、AQR Market Timing Sin a Little、Faber均线风控${cfg.method_note ? `｜${cfg.method_note}` : ''}${cfg.data_note ? `｜${cfg.data_note}` : ''}${srcNote ? `｜${srcNote}` : ''}${tactical ? '｜战术层：VIX/F&G/Put-Call只在极端时调整倍数，不进入战略评分' : ''}`,

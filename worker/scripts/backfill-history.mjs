@@ -63,6 +63,18 @@ async function yahooMonthly(symbol) {
     .filter(p => p.close != null && p.close > 0);
 }
 
+// CNN Fear&Greed graphdata：F&G 与 Put/Call 各约 252 天日度历史（时间戳 ms）
+async function cnnSentimentHistory() {
+  const j = await fetchJson('https://production.dataviz.cnn.io/index/fearandgreed/graphdata', {
+    'Referer': 'https://edition.cnn.com/', 'Origin': 'https://edition.cnn.com',
+  });
+  const toSeries = (arr) => (arr || [])
+    .map(p => ({ date: new Date(p.x).toISOString().slice(0, 10), value: p.y }))
+    .filter(p => p.value != null)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  return { fg: toSeries(j.fear_and_greed_historical?.data), pc: toSeries(j.put_call_options?.data) };
+}
+
 async function forwardPeSeries(series) {
   const url = `https://historyofmarket.com/api/${series === 'ndx' ? 'ndx' : 'sp500'}/forward-pe.json`;
   const j = await fetchJson(url);
@@ -197,7 +209,7 @@ console.log(`回填窗口: ${START} ~ ${END}`);
 console.log('抓取序列...');
 
 const manual = {};
-const [baa, dgs10, tips, shiller, fwdNdx, fwdSpx, cpi, qqqK, vooK, gldK, hsiK, dxK, gcM, hgW] = await Promise.all([
+const [baa, dgs10, tips, shiller, fwdNdx, fwdSpx, cpi, qqqK, vooK, gldK, hsiK, dxK, gcM, hgW, vixK, vix3mK, cnnS] = await Promise.all([
   fredSeries('DBAA'), fredSeries('DGS10'), fredSeries('DFII10'), capeMonthly(),
   forwardPeSeries('ndx'), forwardPeSeries('spx'), cpiMap(),
   yahooDaily('QQQ'), yahooDaily('VOO'), yahooDaily('GLD'), yahooDaily('^HSI'),
@@ -210,8 +222,12 @@ const [baa, dgs10, tips, shiller, fwdNdx, fwdSpx, cpi, qqqK, vooK, gldK, hsiK, d
     return ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), value: close[i] }))
       .filter(p => p.value != null && p.value > 0);
   }),
+  yahooDaily('^VIX').then(a => a.map(p => ({ date: p.date, value: p.close }))),
+  yahooDaily('^VIX3M').then(a => a.map(p => ({ date: p.date, value: p.close }))),
+  cnnSentimentHistory(),
 ]);
 console.log('全局序列 OK: baa', Object.keys(baa).length, 'tips', Object.keys(tips).length, 'shiller', Object.keys(shiller).length);
+console.log('情绪序列 OK: VIX', vixK.length, 'VIX3M', vix3mK.length, 'F&G', cnnS.fg.length, 'P/C', cnnS.pc.length);
 
 const EM_CODES = { abc_bank: '601288', ccb_bank: '601939', cmb_bank: '600036', yangtze_power: '600900', zijin_mining: '601899' };
 const emSeries = {};
@@ -256,9 +272,10 @@ const rows = []; // {target_id, date, composite_score, multiple, indicators}
 let date = START;
 while (date <= END) {
   const globalData = {
-    vix: { value: null }, vix3m: { value: null }, fear_greed: { value: null },
+    vix: { value: asOf(vixK, date) }, vix3m: { value: asOf(vix3mK, date) },
+    fear_greed: { value: asOf(cnnS.fg, date) }, put_call_ratio: { value: asOf(cnnS.pc, date) },
     treasury_10y: { value: asOfMap(dgs10, date), source: 'FRED (DGS10)' },
-    put_call_ratio: { value: null }, dxy: { value: null },
+    dxy: { value: null },
     shiller_pe: { value: asOfMap(shiller, date), source: 'FRED (SHILLER_PE)' },
     baa_yield: { value: asOfMap(baa, date), source: 'FRED (DBAA)' },
     real_yield_10y: { value: asOfMap(tips, date), source: 'FRED (DFII10)' },
@@ -379,6 +396,14 @@ while (date <= END) {
   for (const r of results) {
     const ind = {};
     for (const i of r.indicators) ind[i.name] = { v: i.value, s: i.score };
+    // 全局战术情绪指标（与生产 saveScoreHistory 同逻辑）
+    const st = r.sentiment;
+    if (st) {
+      if (st.vix != null) ind['VIX波动率'] = { v: st.vix, s: null };
+      if (st.vix_ratio != null) ind['VIX/VIX3M'] = { v: st.vix_ratio, s: null };
+      if (st.fear_greed != null) ind['恐惧与贪婪指数'] = { v: st.fear_greed, s: null };
+      if (st.put_call != null) ind['看跌/看涨期权比率'] = { v: st.put_call, s: null };
+    }
     rows.push({
       target_id: r.target_id, date,
       composite_score: r.composite_score, multiple: r.strategy?.multiple ?? null,

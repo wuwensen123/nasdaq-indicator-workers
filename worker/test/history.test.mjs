@@ -50,6 +50,43 @@ test('saveScoreHistory writes one row per target with INSERT OR REPLACE', async 
   assert.equal(parsed['PE综合估值'].s, 68.22);
 });
 
+test('saveScoreHistory merges global sentiment into indicators JSON', async () => {
+  const { env, written } = mockD1();
+  const data = {
+    analysis: {
+      results: [{
+        target_id: 'hsi', composite_score: null, strategy: { multiple: 0 },
+        indicators: [{ name: '200日趋势风控', value: -4.86, score: 54.58 }],
+        sentiment: { vix: 19.1, vix3m: 19.3, vix_ratio: 0.99, fear_greed: 36.6, put_call: 0.868 },
+      }],
+    },
+  };
+  await saveScoreHistory(env, data, '2026-11-12');
+  const ins = written.find(w => w.sql.includes('INSERT OR REPLACE INTO score_history'));
+  const parsed = JSON.parse(ins.args[4]);
+  assert.equal(parsed['VIX波动率'].v, 19.1);
+  assert.equal(parsed['VIX/VIX3M'].v, 0.99);
+  assert.equal(parsed['恐惧与贪婪指数'].v, 36.6);
+  assert.equal(parsed['看跌/看涨期权比率'].v, 0.868);
+  assert.equal(parsed['VIX波动率'].s, null);
+  assert.equal(parsed['200日趋势风控'].s, 54.58);
+});
+
+test('saveScoreHistory skips sentiment fields that are null', async () => {
+  const { env, written } = mockD1();
+  const data = {
+    analysis: {
+      results: [{
+        target_id: 'qqq', composite_score: 62, strategy: { multiple: 1 },
+        indicators: [], sentiment: { vix: 19.1, vix3m: null, vix_ratio: null, fear_greed: null, put_call: null },
+      }],
+    },
+  };
+  await saveScoreHistory(env, data, '2026-11-12');
+  const parsed = JSON.parse(written.find(w => w.sql.includes('INSERT')).args[4]);
+  assert.deepEqual(Object.keys(parsed), ['VIX波动率']);
+});
+
 test('saveScoreHistory skips empty results', async () => {
   const { env, written } = mockD1();
   await saveScoreHistory(env, { analysis: { results: [] } }, '2026-11-12');

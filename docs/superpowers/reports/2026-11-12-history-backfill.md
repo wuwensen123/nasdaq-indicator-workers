@@ -1,8 +1,19 @@
 # 全部指标 90 天回溯 + 历史回填 验收报告
 
 **日期:** 2026-11-12
-**版本:** v2.5.1
+**版本:** v2.6.0（v2.5.1 后补充战术情绪指标回溯）
 **计划:** [2026-11-12-indicator-history-90d.md](../plans/2026-11-12-indicator-history-90d.md)
+
+## 战术情绪指标回溯（v2.6.0 补充）
+
+用户反馈「战术情绪这几个指标没有」，已补入 90 天回溯：
+
+- **analyzer**：`analyzeTarget` 新增 `sentiment` 字段（vix / vix3m / vix_ratio / fear_greed / put_call）——所有标的都计算（市场级快照），但只有 `tactical_fg !== false` 的标的参与倍数叠加；`tactical` 字段语义不变
+- **每日快照**：`saveScoreHistory` 把 sentiment 并入 indicators JSON，名称「VIX波动率」「VIX/VIX3M」「恐惧与贪婪指数」「看跌/看涨期权比率」，`{v, s:null}`（情绪指标不参与战略评分，无得分）
+- **90 天回填**：VIX/VIX3M 用 Yahoo 日线（真值）；F&G 与 Put/Call 用 CNN graphdata 历史（约 252 天日度，真值）；逐日 as-of，11 标的每行都带同一组情绪值
+- **前端零改动**：按钮行从 indicators 自动生成，情绪指标自动出现（QQQ 共 11 个按钮）；tooltip 对 `s=null` 只显示值
+- **验证**：生产 `/api/history` 四指标各 90 点；浏览器实测 F&G 曲线 90 点（64.3→36.6）、VIX 曲线 12.5-30.3；54 个单测全绿
+- 口径说明：回填 P/C 为 CNN 序列（CBOE 5 日平均口径），生产当日值优先 CBOE 实时源，两者小差属跨源正常
 
 ## 目标（用户 /goal）
 
