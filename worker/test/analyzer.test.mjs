@@ -92,7 +92,7 @@ test('QQQ strategic result includes tactical block and new indicators', () => {
   assert.equal(r.tactical.coeff, 1);
   assert.ok(r.indicators.some(i => i.name === 'Forward P/E'));
   assert.ok(r.indicators.some(i => i.name === 'EY spread vs Baa'));
-  assert.equal(r.indicators.find(i => i.name === 'Forward P/E').source, 'Yahoo Finance');
+  assert.ok(r.indicators.find(i => i.name === 'Forward P/E').source.startsWith('Yahoo Finance'));
   assert.equal(typeof r.composite_score, 'number');
 });
 
@@ -110,7 +110,7 @@ test('bank pb_pct_hist prefers per-stock percentile over index-wide', () => {
   const r = a.analyzeTarget('abc_bank', data, global);
   const ind = r.indicators.find(i => i.name === 'PB历史分位');
   assert.equal(ind.score, 8.7); // 0.087*100
-  assert.match(ind.source, /东方财富/);
+  assert.ok(ind.source.includes('东方财富') && ind.source.includes('2018'), ind.source);
 });
 
 test('bank pb_pct_hist falls back to index percentile when per-stock missing', () => {
@@ -121,4 +121,15 @@ test('bank pb_pct_hist falls back to index percentile when per-stock missing', (
   const ind = r.indicators.find(i => i.name === 'PB历史分位');
   assert.equal(ind.score, 72);
   // fallback 无个股数据时用指数分位（韭圈儿/蛋卷），score 仍为 0-100
+});
+
+test('forward_pe uses dynamic history percentile when series present', () => {
+  const a = new Analyzer();
+  const series = Array.from({ length: 100 }, (_, i) => ({ date: `20${String(i).padStart(2, '0')}-01-01`, value: 10 + i * 0.2 })); // 10..29.8
+  const global = { fwd_pe_hist: { ndx: { series, source: 'historyofmarket.com', updated_at: '2026-11-12T00:00:00Z' } } };
+  const data = { qqq: { pe_ratio: 28, forward_pe: 25.5, pe_data: { source: 'Yahoo Finance', updated_at: '2026-11-11T07:30:00.000Z' } } };
+  const r = a.analyzeTarget('qqq', data, global);
+  const ind = r.indicators.find(i => i.name === 'Forward P/E');
+  assert.ok(Math.abs(ind.score - 77.5) < 1.5, `score=${ind.score}`); // 25.5 在 10..29.8 ≈ 77.5 分位
+  assert.ok(ind.source.includes('historyofmarket'), ind.source);
 });

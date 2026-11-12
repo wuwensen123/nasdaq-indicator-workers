@@ -240,12 +240,29 @@ export class Analyzer {
     }
     if (key === 'forward_pe') {
       // 未来12个月预期PE：JPM/Goldman 的12个月估值主指标；与trailing PE互补
+      // 评分优先用真实历史序列动态分位（historyofmarket：NDX 2001 / SPX 1990 至今周度，
+      // 与 StockAnalysis 当日值同口径，交叉差 <1.5%）；序列缺失时回退静态锚点表
       const v = td.forward_pe;
-      const tbl = cfg.pe_family === 'spx' ? PE_FWD_PCT_SPX : PE_FWD_PCT_NDX;
-      const score = v != null ? this._pctFromAnchors(v, tbl) : null;
+      const histFamily = cfg.pe_family === 'spx' ? 'spx' : 'ndx';
+      const hist = global.fwd_pe_hist?.[histFamily];
+      let score, note;
+      if (v != null && Array.isArray(hist?.series) && hist.series.length > 50) {
+        const pct = this._pctInSeries(v, hist.series);
+        if (pct != null) {
+          score = round(pct * 100);
+          note = `${hist.source ?? 'historyofmarket.com'}历史分位(${hist.series.length}点,${hist.updated_at ? String(hist.updated_at).slice(0, 10) : ''})`;
+        }
+      }
+      if (score == null) {
+        const tbl = cfg.pe_family === 'spx' ? PE_FWD_PCT_SPX : PE_FWD_PCT_NDX;
+        score = v != null ? this._pctFromAnchors(v, tbl) : null;
+        score = score == null ? null : round(score);
+        note = '静态锚点表(无历史序列时兜底)';
+      }
       return {
-        value: v, score: score == null ? null : round(score),
-        source: td.forward_pe_data?.source ?? td.pe_data?.source ?? null,
+        value: v, score,
+        source: [td.forward_pe_data?.source ?? td.pe_data?.source ?? null, note]
+          .filter(Boolean).join(' · ') || null,
         as_of: td.forward_pe_data?.updated_at ?? td.pe_data?.updated_at ?? null,
       };
     }
@@ -321,9 +338,8 @@ export class Analyzer {
         return {
           value: indiv.current_pb ?? td.pb ?? null,
           score: round(indiv.pct * 100),
-          source: indiv.source ?? '东方财富',
+          source: `${indiv.source ?? '东方财富'} · 个股PB历史分位（${indiv.count}个交易日）`,
           as_of: indiv.updated_at ?? indiv.fetched_at ?? null,
-          note: `个股PB历史分位（${indiv.count}个交易日，2018以来）`,
         };
       }
       const jq = this._jq(cfg, global);
@@ -475,6 +491,17 @@ export class Analyzer {
       }
     }
     return anchors[anchors.length - 1][1];
+  }
+
+  // 值在历史序列中的分位（0-1）：<=min→0、>=max→1，其余按 lowerBound/n
+  _pctInSeries(value, series) {
+    if (!Array.isArray(series) || !series.length || value == null) return null;
+    const sorted = series.map(p => p.value).sort((a, b) => a - b);
+    if (value <= sorted[0]) return 0;
+    if (value >= sorted[sorted.length - 1]) return 1;
+    let lo = 0, hi = sorted.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] <= value) lo = mid + 1; else hi = mid; }
+    return lo / sorted.length;
   }
 
   // ERP打分：≥+2%→10分 … <−2%→90+（机构口径：ERP越高股票越有吸引力）

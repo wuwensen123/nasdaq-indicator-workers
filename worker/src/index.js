@@ -126,6 +126,8 @@ async function fetchFreshData(env) {
     jiuquan: { map: jiuquan.map, source: jiuquan.source, updated_at: jiuquan.updated_at },
     // 中证官方每日估值：红利低波(H30269) / 红利低波100(930955) 各自独立，不用蛋卷代理
     csi: { H30269: csiH30269, '930955': csi930955 },
+    // Forward PE 历史序列（动态分位）：NDX(QQQ) / SPX(VOO)
+    fwd_pe_hist: { ndx: fwdHistNdx, spx: fwdHistSpx },
     updated_at: new Date().toISOString(),
   };
 
@@ -141,6 +143,8 @@ async function fetchFreshData(env) {
   const fwdTargets = targets.filter(t => t.strategic && t.indicators.includes('forward_pe'));
   const fwdMap = {};
   await Promise.all(fwdTargets.map(async t => { fwdMap[t.id] = await fetcher.getForwardPE(t.symbol); }));
+  // Forward PE 历史序列（NDX/SPX 各一次，动态分位用；失败时 analyzer 回退静态锚点表）
+  const [fwdHistNdx, fwdHistSpx] = await Promise.all([fetcher.getForwardPEHistory('ndx'), fetcher.getForwardPEHistory('spx')]);
   // 股息率/PB 仅抓取评分真正用到的标的，进一步省子请求配额
   const needDY = (t) => t.strategic && t.dy_source === 'td' && (t.indicators.includes('dy_spread_cn') || t.indicators.includes('div_yield_level'));
   const needPB = (t) => t.strategic && t.indicators.includes('stock_pb');

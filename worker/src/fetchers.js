@@ -161,6 +161,57 @@ export class Fetcher {
     return c ? { ...c.data, fetched_at: c.fetched_at } : null;
   }
 
+  // ========== NDX/SPX Forward PE 历史（historyofmarket.com，CC BY 4.0） ==========
+  // terminal 12M blended-forward consensus（周度）2001/1990 起；forwardOwn（ETF持仓加权日更）2026-08 起，
+  // 两者同口径连续（重叠日差 0.2-0.6%），合并后做 Forward PE 动态历史分位
+  _mergeFwdSeries(fwd, fwdOwn) {
+    const own = Array.isArray(fwdOwn) ? [...fwdOwn] : [];
+    const base = Array.isArray(fwd) ? [...fwd] : [];
+    const lastBaseDate = base.length ? base[base.length - 1].date : null;
+    const tail = own.filter(p => lastBaseDate == null || p.date >= lastBaseDate);
+    const merged = [...base.filter(p => lastBaseDate == null || p.date < lastBaseDate), ...tail];
+    merged.sort((a, b) => a.date < b.date ? -1 : 1);
+    // 去重（保后者）
+    const seen = new Set();
+    return merged.filter(p => {
+      if (seen.has(p.date)) return false;
+      seen.add(p.date);
+      return true;
+    });
+  }
+
+  // 抓取并缓存 6h；失败返回 null（analyzer 回退静态锚点表）
+  async getForwardPEHistory(series) {
+    const key = series === 'ndx' ? 'ndx' : 'spx';
+    if (this._fwdHistCache?.[key] && Date.now() - this._fwdHistCache[key].ts < 6 * 3600 * 1000) {
+      return this._fwdHistCache[key].data;
+    }
+    try {
+      const url = `https://historyofmarket.com/api/${key === 'ndx' ? 'ndx' : 'sp500'}/forward-pe.json`;
+      const j = await fetchJSON(url);
+      const seriesData = {
+        series: this._mergeFwdSeries(j.forward, j.forwardOwn),
+        currentOwn: j.current?.forwardOwn ?? null,
+        updated_at: j.updated ?? null,
+        source: 'historyofmarket.com',
+      };
+      if (!seriesData.series.length) return null;
+      this._fwdHistCache = { ...(this._fwdHistCache || {}), [key]: { ts: Date.now(), data: seriesData } };
+      return seriesData;
+    } catch { return null; }
+  }
+
+  // 值在序列中的分位（0-1）：lowerBound 索引 / n；<=min→0、>=max→1
+  _pctInSeries(value, series) {
+    if (!Array.isArray(series) || !series.length || value == null) return null;
+    const sorted = series.map(p => p.value).sort((a, b) => a - b);
+    if (value <= sorted[0]) return 0;
+    if (value >= sorted[sorted.length - 1]) return 1;
+    let lo = 0, hi = sorted.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] <= value) lo = mid + 1; else hi = mid; }
+    return lo / sorted.length;
+  }
+
   // ========== VIX ==========
   // 进程内短缓存：同一次 refresh 里 put_call 兜底会重复调用，省子请求
   async getVIX() {

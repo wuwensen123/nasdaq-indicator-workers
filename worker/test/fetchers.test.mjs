@@ -202,3 +202,34 @@ test('getBankPbPercentile returns null when cache missing', async () => {
   const env = { nasdaq_cache: { prepare: () => ({ bind: () => ({ first: async () => null }) }) } };
   assert.equal(await new Fetcher().getBankPbPercentile(env, 'abc_bank'), null);
 });
+
+// ====== Task 3: NDX/SPX Forward PE 动态分位（historyofmarket.com） ======
+test('mergeFwdSeries appends forwardOwn after last terminal point, no dup dates', () => {
+  const f = new Fetcher();
+  const series = f._mergeFwdSeries(
+    [ { date: '2026-08-04', value: 22.4 }, { date: '2026-08-05', value: 22.37 } ],
+    [ { date: '2026-08-05', value: 22.41 }, { date: '2026-08-06', value: 22.25 }, { date: '2026-08-07', value: 22.29 } ]
+  );
+  assert.deepEqual(series.map(p => p.date), ['2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07']);
+  assert.equal(series[1].value, 22.41); // 重叠日保留 forwardOwn
+});
+
+test('getForwardPEHistory parses terminal+own series', async () => {
+  globalThis.fetch = async () => mockResponse({
+    updated: '2026-11-12',
+    current: { forward: 22.37, forwardOwn: 19.56 },
+    forward: [ { date: '2001-04-27', value: 73.37 }, { date: '2026-08-05', value: 22.37 } ],
+    forwardOwn: [ { date: '2026-08-05', value: 22.41 }, { date: '2026-08-06', value: 22.25 } ],
+  });
+  const r = await new Fetcher().getForwardPEHistory('ndx');
+  assert.equal(r.series.length, 3);
+  assert.equal(r.series[r.series.length - 1].date, '2026-08-06');
+  assert.equal(r.currentOwn, 19.56);
+  assert.match(r.source, /historyofmarket/);
+});
+
+test('getForwardPEHistory returns null series on failure', async () => {
+  globalThis.fetch = async () => { throw new Error('network down'); };
+  const r = await new Fetcher().getForwardPEHistory('spx');
+  assert.equal(r, null);
+});
