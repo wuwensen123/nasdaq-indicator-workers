@@ -52,6 +52,13 @@ async function initDB(env) {
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       )
     `).run();
+    await env.nasdaq_cache.prepare(`
+      CREATE TABLE IF NOT EXISTS valuation_cache (
+        key TEXT PRIMARY KEY,
+        data TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `).run();
   } catch (e) {
     console.error('DB init error:', e.message);
   }

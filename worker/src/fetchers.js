@@ -77,6 +77,24 @@ async function fetchYahooPE(symbol) {
 }
 
 export class Fetcher {
+  // ========== D1 通用估值缓存（银行PB历史分位等低频大数据） ==========
+  async getValuationCache(env, key) {
+    if (!env?.nasdaq_cache) return null;
+    try {
+      const r = await env.nasdaq_cache.prepare('SELECT data, updated_at FROM valuation_cache WHERE key = ?').bind(key).first();
+      return r ? { data: JSON.parse(r.data), fetched_at: r.updated_at } : null;
+    } catch { return null; }
+  }
+
+  async setValuationCache(env, key, data) {
+    if (!env?.nasdaq_cache) return;
+    try {
+      await env.nasdaq_cache.prepare(
+        'INSERT INTO valuation_cache (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at'
+      ).bind(key, JSON.stringify(data), new Date().toISOString()).run();
+    } catch {}
+  }
+
   // ========== VIX ==========
   // 进程内短缓存：同一次 refresh 里 put_call 兜底会重复调用，省子请求
   async getVIX() {

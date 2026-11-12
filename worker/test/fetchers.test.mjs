@@ -139,3 +139,32 @@ test('getBaaYield skips empty trailing rows', async () => {
   const r = await new Fetcher().getBaaYield();
   assert.equal(r.value, 5.18);
 });
+
+// ====== Task 1: D1 valuation_cache 通用读写 ======
+function fakeCacheEnv() {
+  const store = new Map();
+  return {
+    nasdaq_cache: {
+      prepare: (sql) => {
+        if (sql.includes('SELECT')) {
+          return { bind: () => ({ first: async () => { const v = store.get('k'); return v ? { data: v.data, updated_at: v.updated_at } : null; } }) };
+        }
+        return { bind: () => ({ run: async () => { store.set('k', { data: JSON.stringify({ pb: 1.0 }), updated_at: '2026-11-12T00:00:00Z' }); } }) };
+      },
+    },
+  };
+}
+
+test('getValuationCache reads stored value', async () => {
+  const fetcher = new Fetcher();
+  const env = fakeCacheEnv();
+  await fetcher.setValuationCache(env, 'bank_pb_pct:abc_bank', { pb: 1.0 });
+  const r = await fetcher.getValuationCache(env, 'bank_pb_pct:abc_bank');
+  assert.equal(r.data.pb, 1.0);
+  assert.equal(r.fetched_at, '2026-11-12T00:00:00Z');
+});
+
+test('getValuationCache returns null when env missing', async () => {
+  const fetcher = new Fetcher();
+  assert.equal(await fetcher.getValuationCache(undefined, 'k'), null);
+});
