@@ -63,6 +63,17 @@ async function yahooMonthly(symbol) {
     .filter(p => p.close != null && p.close > 0);
 }
 
+// 韭圈儿指数估值历史（约 10 年逐交易日）：PE/PB/股息率(xilv)/ROE
+// 分位不信任 API 的当日 percentile（无历史值），在截至每日的子序列上本地重算 le/n×100（与 API 差 <0.1pp）
+async function jiuquanHistory(code) {
+  const base = `https://ai2.jiucaishuo.com/api/index-valuation/history?code=${code}&years2=5&name=x&metric=`;
+  const fix = (arr) => (arr || []).map(p => ({ date: p.date, value: p.value }))
+    .filter(p => p.value != null).sort((a, b) => (a.date < b.date ? -1 : 1));
+  const [pe, pb, dy, roe] = await Promise.all(['pe', 'pb', 'xilv', 'roe'].map(m =>
+    fetchJson(base + m, { 'Referer': 'https://www.jiucaishuo.com/' }).then(j => fix(j.series))));
+  return { pe, pb, dy, roe };
+}
+
 // CNN Fear&Greed graphdata：F&G 与 Put/Call 各约 252 天日度历史（时间戳 ms）
 async function cnnSentimentHistory() {
   const j = await fetchJson('https://production.dataviz.cnn.io/index/fearandgreed/graphdata', {
@@ -199,6 +210,13 @@ function pctRankUpTo(points, date, value) {
   for (const v of sorted) { if (v <= value) le++; else break; }
   return le / sorted.length;
 }
+// 分位百分数（韭圈儿口径 le/n×100，含边界；仅用 <= date 的点）
+function pct100UpTo(points, date, value) {
+  let le = 0, n = 0;
+  for (const p of points) { if (p.date <= date) { n++; if (p.value <= value) le++; } else break; }
+  if (!n) return null;
+  return Math.round(le / n * 10000) / 100;
+}
 
 // ---------- main ----------
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -228,6 +246,16 @@ const [baa, dgs10, tips, shiller, fwdNdx, fwdSpx, cpi, qqqK, vooK, gldK, hsiK, d
 ]);
 console.log('全局序列 OK: baa', Object.keys(baa).length, 'tips', Object.keys(tips).length, 'shiller', Object.keys(shiller).length);
 console.log('情绪序列 OK: VIX', vixK.length, 'VIX3M', vix3mK.length, 'F&G', cnnS.fg.length, 'P/C', cnnS.pc.length);
+
+// 韭圈儿估值历史：红利低波（H30269）与红利低波100（930955）各自独立
+const JQ_CODES = { dividend_low_vol_etf: 'h30269.CSI', dividend_low_vol_100: '930955.CSI' };
+const jqHist = {};
+for (const [id, code] of Object.entries(JQ_CODES)) {
+  const h = await jiuquanHistory(code);
+  console.log('韭圈儿', code, 'pe', h.pe.length, 'pb', h.pb.length, 'dy', h.dy.length, 'roe', h.roe.length);
+  if (!h.pe.length || !h.pb.length) throw new Error('韭圈儿历史抓取失败 ' + code);
+  jqHist[id] = { code, ...h };
+}
 
 const EM_CODES = { abc_bank: '601288', ccb_bank: '601939', cmb_bank: '600036', yangtze_power: '600900', zijin_mining: '601899' };
 const emSeries = {};
@@ -294,7 +322,9 @@ while (date <= END) {
       return Math.round(vals.filter(x => x <= cur).length / vals.length * 1000) / 10;
     })() },
     gold_pct_hist: null,
-    danjuan: { map: {}, source: null }, jiuquan: { map: {}, source: null },
+    danjuan: { map: {}, source: null },
+    // 韭圈儿估值（红利低波两只）：逐日 as-of + 截至当日的历史分位（无未来函数）
+    jiuquan: { map: {}, source: '韭圈儿(回填)' },
     csi: { H30269: null, '930955': null },
     // forward PE 历史分位：用截至当日的子序列（无未来函数）
     fwd_pe_hist: {
@@ -303,6 +333,17 @@ while (date <= END) {
     },
     updated_at: date,
   };
+  // 韭圈儿 map：PE/PB/股息率/ROE + 本地分位（韭圈儿 API 只给当日 percentile）
+  for (const { code, pe: sPe, pb: sPb, dy: sDy, roe: sRoe } of Object.values(jqHist)) {
+    const pe = asOf(sPe, date), pb = asOf(sPb, date), dy = asOf(sDy, date), roe = asOf(sRoe, date);
+    if (pe == null && pb == null) continue;
+    globalData.jiuquan.map[code] = {
+      pe, pb, dy, roe,
+      pe_pct: pe != null ? pct100UpTo(sPe, date, pe) : null,
+      pb_pct: pb != null ? pct100UpTo(sPb, date, pb) : null,
+      date, insufficient: false,
+    };
+  }
 
   // 黄金实际价格分位：GC 月线 × CPI（与生产同口径：real = close × cpiLatest/cpiMonth）
   {
