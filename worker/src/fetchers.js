@@ -390,16 +390,25 @@ export class Fetcher {
   }
 
   // ========== 穆迪Baa公司债收益率（EY spread vs Baa，JPM估值表口径） ==========
-  async getBaaYield() {
+  // 每日真值来自 FRED API（api.stlouisfed.org，Workers 出口可通），需免费 API key 配置为
+  // Worker secret FRED_API_KEY；无 key 或请求失败时返回 null，analyzer 回退 JPM 锚 + 10Y 调整
+  async getBaaYield(env) {
+    const key = env?.FRED_API_KEY;
+    if (!key) {
+      // 无 key：跳过请求（fredgraph.csv 在 Workers 出口必 520，省子请求），直接走 JPM 锚兜底
+      return { value: null, source: 'FRED (DBAA)', updated_at: now() };
+    }
     try {
-      const csv = await fetch('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DBAA', { headers: { 'User-Agent': UA_PLAIN } }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); });
-      const lines = csv.trim().split('\n');
-      for (let i = lines.length - 1; i >= 1; i--) {
-        const v = parseFloat(lines[i].split(',')[1]);
-        if (!isNaN(v)) return { value: round(v), source: 'FRED (DBAA)', updated_at: now() };
+      const j = await fetchJSON(`https://api.stlouisfed.org/fred/series/observations?series_id=DBAA&file_type=json&sort_order=desc&limit=3&api_key=${encodeURIComponent(key)}`);
+      const obs = j?.observations ?? [];
+      for (const o of obs) {
+        const v = parseFloat(o?.value);
+        if (!isNaN(v)) return { value: round(v), source: 'FRED API (DBAA)', updated_at: o.date ?? now() };
       }
-    } catch {}
-    return { value: null, source: 'FRED (DBAA)', updated_at: now() };
+      return { value: null, source: 'FRED API (DBAA)', updated_at: now() };
+    } catch {
+      return { value: null, source: 'FRED API (DBAA)', updated_at: now() };
+    }
   }
 
   // ========== 黄金实际价格历史分位（GC=F月线 ÷ CPI，黄金的"CAPE"） ==========

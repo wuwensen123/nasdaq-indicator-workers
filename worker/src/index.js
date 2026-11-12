@@ -105,7 +105,7 @@ async function fetchFreshData(env) {
   const [vix, vix3m, fearGreed, treasury, putCall, dxy, shillerPE, realYield, baaYield, goldRealPct, dxyPct, copperPct, danjuan, jiuquan, csiH30269, csi930955] = await Promise.all([
     fetcher.getVIX(), fetcher.getVIX3M(), fetcher.getFearGreed(), fetcher.getTreasuryYield(),
     fetcher.getPutCallRatio(), fetcher.getDXY(), fetcher.getShillerPE(),
-    fetcher.getRealYield10Y(), fetcher.getBaaYield(),
+    fetcher.getRealYield10Y(), fetcher.getBaaYield(env),
     fetcher.getGoldRealPricePercentile(), fetcher.getDXYPercentile(),
     fetcher.getCommodityPercentile('HG=F', 'COMEX铜'),
     fetcher.getDanjuanValuations(),

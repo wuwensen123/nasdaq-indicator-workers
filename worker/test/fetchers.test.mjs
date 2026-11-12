@@ -127,17 +127,18 @@ test('getVIX3M returns null value on network failure', async () => {
   assert.equal(r.value, null);
 });
 
-test('getBaaYield reads last non-empty FRED DBAA row', async () => {
-  globalThis.fetch = async () => mockResponse('observation_date,DBAA\n2026-11-07,5.18\n2026-11-10,5.21\n');
-  const r = await new Fetcher().getBaaYield();
-  assert.equal(r.value, 5.21);
-  assert.equal(r.source, 'FRED (DBAA)');
+test('getBaaYield without key sends no request (CSV path retired)', async () => {
+  let called = 0;
+  globalThis.fetch = async () => { called++; return mockResponse(''); };
+  const r = await new Fetcher().getBaaYield({});
+  assert.equal(r.value, null);
+  assert.equal(called, 0);
 });
 
-test('getBaaYield skips empty trailing rows', async () => {
-  globalThis.fetch = async () => mockResponse('observation_date,DBAA\n2026-11-07,5.18\n2026-11-10,\n');
-  const r = await new Fetcher().getBaaYield();
-  assert.equal(r.value, 5.18);
+test('getBaaYield falls through empty observations with key', async () => {
+  globalThis.fetch = async () => mockResponse({ observations: [ { date: '2026-11-10', value: '.' } ] });
+  const r = await new Fetcher().getBaaYield({ FRED_API_KEY: 'k' });
+  assert.equal(r.value, null);
 });
 
 // ====== Task 1: D1 valuation_cache 通用读写 ======
@@ -232,4 +233,29 @@ test('getForwardPEHistory returns null series on failure', async () => {
   globalThis.fetch = async () => { throw new Error('network down'); };
   const r = await new Fetcher().getForwardPEHistory('spx');
   assert.equal(r, null);
+});
+
+// ====== Task 4: Baa 每日真值（FRED API key 可选） ======
+test('getBaaYield returns null without API key, no throw', async () => {
+  globalThis.fetch = async () => { throw new Error('should not fetch without key'); };
+  const r = await new Fetcher().getBaaYield({});
+  assert.equal(r.value, null);
+  assert.match(r.source, /FRED/);
+});
+
+test('getBaaYield parses FRED API observation with key', async () => {
+  globalThis.fetch = async (url) => {
+    assert.ok(String(url).includes('api.stlouisfed.org'));
+    assert.ok(String(url).includes('api_key=testkey123'));
+    return mockResponse({ observations: [ { date: '2026-11-10', value: '5.94' } ] });
+  };
+  const r = await new Fetcher().getBaaYield({ FRED_API_KEY: 'testkey123' });
+  assert.equal(r.value, 5.94);
+  assert.match(r.source, /FRED/);
+});
+
+test('getBaaYield returns null on bad key or network failure', async () => {
+  globalThis.fetch = async () => mockResponse({ observations: [] }, { status: 200 });
+  const r = await new Fetcher().getBaaYield({ FRED_API_KEY: 'bad' });
+  assert.equal(r.value, null);
 });
