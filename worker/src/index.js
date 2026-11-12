@@ -189,10 +189,17 @@ async function fetchFreshData(env) {
   const peTargets = targets.filter(t => t.strategic && (t.indicators.includes('pe_composite') || t.indicators.includes('erp')));
   const peMap = {};
   await Promise.all(peTargets.map(async t => { peMap[t.id] = await fetcher.getPERatio(t.symbol, t.name); }));
-  // Forward PE 只抓真正用到的标的（QQQ/VOO），Yahoo 对 ETF 不返回 forwardPE
+  // Forward PE 值（QQQ/VOO）：改用 historyofmarket 合并序列的当日值——与分位序列同源，
+  // 与 90 天回填口径完全一致（StockAnalysis 无历史，跨源会引入每日偏差和曲线跳变）
   const fwdTargets = targets.filter(t => t.strategic && t.indicators.includes('forward_pe'));
   const fwdMap = {};
-  await Promise.all(fwdTargets.map(async t => { fwdMap[t.id] = await fetcher.getForwardPE(t.symbol); }));
+  for (const t of fwdTargets) {
+    const hist = t.id === 'qqq' ? fwdHistNdx : fwdHistSpx; // qqq→NDX, voo→SPX
+    const last = hist?.series?.length ? hist.series[hist.series.length - 1] : null;
+    fwdMap[t.id] = last?.value != null
+      ? { value: last.value, source: 'historyofmarket.com', updated_at: last.date ?? null }
+      : null;
+  }
   // 股息率/PB 仅抓取评分真正用到的标的，进一步省子请求配额
   const needDY = (t) => t.strategic && t.dy_source === 'td' && (t.indicators.includes('dy_spread_cn') || t.indicators.includes('div_yield_level'));
   const needPB = (t) => t.strategic && t.indicators.includes('stock_pb');
@@ -283,11 +290,20 @@ export default {
       const since = new Date(Date.now() - days * 86400000 + 8 * 3600 * 1000).toISOString().slice(0, 10);
       try {
         const q = await env.nasdaq_cache.prepare(
-          'SELECT target_id, date, composite_score, multiple FROM score_history WHERE date >= ? ORDER BY date'
+          'SELECT target_id, date, composite_score, multiple, indicators FROM score_history WHERE date >= ? ORDER BY date'
         ).bind(since).all();
         const history = {};
         for (const row of q?.results ?? []) {
-          (history[row.target_id] ||= []).push({ date: row.date, score: row.composite_score, multiple: row.multiple });
+          const h = (history[row.target_id] ||= { series: [], indicators: {} });
+          h.series.push({ date: row.date, score: row.composite_score, multiple: row.multiple });
+          // 每日快照的各指标 {值, 分数}：无指标/坏 JSON 的行容错跳过
+          let ind = {};
+          try { ind = row.indicators ? JSON.parse(row.indicators) : {}; } catch {}
+          for (const name of Object.keys(ind)) {
+            const iv = ind[name];
+            if (!iv || typeof iv !== 'object') continue;
+            (h.indicators[name] ||= []).push({ date: row.date, v: iv.v ?? null, s: iv.s ?? null });
+          }
         }
         return json({ success: true, days, history });
       } catch (e) {

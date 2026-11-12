@@ -804,7 +804,7 @@ export class Analyzer {
       dxy_pct: { name: '美元指数5年分位', desc: '美元越强，以美元计价的黄金越承压（反向驱动）' },
       pe_pct_hist: { name: 'PE历史分位', desc: '指数市盈率历史分位（韭圈儿/蛋卷基金口径，10年或上市以来），估值主锚' },
       pb_pct_hist: { name: 'PB历史分位', desc: '银行股用个股自身历史分位（东方财富2018至今）；其他用韭圈儿/蛋卷指数口径' },
-      forward_pe: { name: 'Forward P/E', desc: '未来12个月预期市盈率（StockAnalysis日更；交叉验证：JPM 2026-09-30 S&P 19.0x、SPY单张FY1 20.38x、Siblis NDX 21.24x）' },
+      forward_pe: { name: 'Forward P/E', desc: '未来12个月预期市盈率（historyofmarket.com 周度terminal+日度forwardOwn 同口径合并，与分位序列同源；交叉验证：JPM 2026-09-30 S&P 19.0x、StockAnalysis QQQ 20.57x）' },
       ey_spread_baa: { name: 'EY spread vs Baa', desc: '盈利收益率−穆迪Baa公司债收益率（JPM估值表口径）；Baa优先FRED DBAA，失败时用JPM 2026-09-30隐含6.26%+10Y调整；负值=股票相对信用债偏贵' },
       erp_hk: { name: '港股ERP', desc: '盈利收益率−美债10Y（港币联系汇率下美债即港股无风险利率），中金口径' },
       div_yield_level: { name: '股息率水平', desc: '股息率相对其历史区间的位置；仅作carry交叉验证，单一高股息可能是陷阱（Morgan Stanley）' },

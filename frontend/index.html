@@ -357,10 +357,11 @@ function showTargetDetail(targetId) {
 
     const historyHtml = `
       <div class="mt-3">
-        <h6 style="color:var(--text-primary);margin-bottom:8px;">90 天评分趋势</h6>
+        <h6 style="color:var(--text-primary);margin-bottom:8px;">90 天指标回溯</h6>
+        <div id="indicatorTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
         <div style="height:150px;position:relative;">
           <canvas id="scoreHistoryChart"></canvas>
-          <div id="scoreHistoryEmpty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:0.82rem;color:var(--text-secondary);">评分历史积累中（每天 7:30 记录一次）</div>
+          <div id="scoreHistoryEmpty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:0.82rem;color:var(--text-secondary);"></div>
         </div>
       </div>`;
 
@@ -378,9 +379,11 @@ function showTargetDetail(targetId) {
     const existingModal = document.getElementById('targetModal');
     if (existingModal) existingModal.remove();
     document.body.insertAdjacentHTML('beforeend', `<div class="modal fade" id="targetModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content" style="background:#ffffff;color:var(--text-primary);border:1px solid var(--border-color);"><div class="modal-header" style="border-bottom:1px solid var(--border-color);"><h5 class="modal-title">${target.target_name}</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row mb-4"><div class="col-md-4 text-center"><div style="position:relative;width:140px;height:140px;margin:0 auto;"><canvas id="modalGauge"></canvas><div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;"><div style="font-size:2rem;font-weight:800;color:${scoreColor};">${score !== null ? score : '?'}</div><div style="font-size:0.75rem;color:var(--text-primary);">/ 100</div></div></div><div style="margin-top:8px;"><span class="status-badge" style="background:${target.position_color}22;color:${target.position_color};font-size:1rem;">${target.market_position}</span></div></div><div class="col-md-8"><div class="strategy-box" style="background:rgba(0,0,0,0.02);border:1px solid var(--border-color);"><div style="color:var(--text-primary);font-size:0.85rem;">建议策略</div><div class="action" style="color:${getStrategyColor(target.strategy?.action)};">${target.strategy?.icon || ''} ${target.strategy?.action || '--'}</div><div class="description">${target.strategy?.description || ''}</div><div class="mt-2"><span style="font-size:0.85rem;">当前价格: </span><span style="font-size:1.1rem;font-weight:600;">${target.current_price != null ? formatNumber(target.current_price) : '--'}</span></div></div></div></div>${coverageHtml}${historyHtml}<h6 style="color:var(--text-primary);margin-bottom:12px;">指标详情</h6>${indicatorsHtml}${tacticalHtml}<div class="formula-box mt-3"><div class="formula-text">${target.formula}</div><div class="formula-detail">${target.formula_detail}</div></div></div></div></div></div>`);
-    const modal = new bootstrap.Modal(document.getElementById('targetModal'));
+    const modalEl = document.getElementById('targetModal');
+    modalEl.dataset.targetId = targetId;
+    const modal = new bootstrap.Modal(modalEl);
     modal.show();
-    document.getElementById('targetModal').addEventListener('shown.bs.modal', function() {
+    modalEl.addEventListener('shown.bs.modal', function() {
       setTimeout(() => createGauge('modalGauge', score), 100);
       loadAndRenderHistory(targetId);
     });
@@ -399,42 +402,96 @@ async function loadAndRenderHistory(targetId) {
   } catch { _historyCache = _historyCache || {}; }
   renderScoreHistory(targetId);
 }
+let _selIndicator = {}; // targetId -> 所选指标（默认综合评分）
+
 function renderScoreHistory(targetId) {
   const canvas = document.getElementById('scoreHistoryChart');
   const empty = document.getElementById('scoreHistoryEmpty');
+  const tabs = document.getElementById('indicatorTabs');
   if (!canvas) return;
-  const points = (_historyCache?.[targetId] || []).filter(p => p.score !== null && p.score !== undefined);
+  const h = _historyCache?.[targetId] || { series: [], indicators: {} };
+  const scoreSeries = (h.series || []).filter(p => p.score !== null && p.score !== undefined);
+  const indMap = h.indicators || {};
+  // 指标按钮顺序 = 快照里首次出现顺序（analyzer 固定顺序）
+  const names = Object.keys(indMap);
+  const options = ['综合评分', ...names];
+  const sel = _selIndicator[targetId] || '综合评分';
+  if (tabs) {
+    tabs.innerHTML = options.map(n =>
+      `<button type="button" class="hist-tab${n === sel ? ' active' : ''}" data-tab="${n}" style="border:1px solid var(--border-color);background:${n === sel ? '#2563eb' : 'rgba(0,0,0,0.03)'};color:${n === sel ? '#fff' : 'var(--text-primary)'};border-radius:12px;padding:2px 10px;font-size:0.74rem;cursor:pointer;">${n}</button>`
+    ).join('');
+  }
+  const isScore = sel === '综合评分';
+  const points = isScore
+    ? scoreSeries.map(p => ({ date: p.date, v: p.score, s: null }))
+    : (indMap[sel] || []).filter(p => p.v !== null || p.s !== null);
   if (points.length < 2) {
     canvas.style.display = 'none';
-    if (empty) empty.style.display = 'flex';
+    if (empty) {
+      empty.style.display = 'flex';
+      empty.textContent = isScore
+        ? '评分历史积累中（每天 7:30 记录一次）'
+        : `「${sel}」暂无历史数据（该数据源仅提供当日快照）`;
+    }
     return;
   }
   if (empty) empty.style.display = 'none';
   canvas.style.display = 'block';
+  const existing = Chart.getChart(canvas);
+  if (existing) existing.destroy();
   const labels = points.map(p => String(p.date).slice(5));
-  const scores = points.map(p => p.score);
+  const values = points.map(p => p.v);
+  const isScoreChart = isScore;
+  const datasets = isScoreChart
+    ? [
+        { label: '评分', data: values, borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.08)', fill: true, tension: 0.25, pointRadius: 0, borderWidth: 2 },
+        { label: '加速线 40', data: values.map(() => 40), borderColor: 'rgba(40,167,69,0.55)', borderDash: [4, 4], pointRadius: 0, borderWidth: 1 },
+        { label: '高位线 75', data: values.map(() => 75), borderColor: 'rgba(220,53,69,0.5)', borderDash: [4, 4], pointRadius: 0, borderWidth: 1 },
+      ]
+    : [{ label: sel, data: values.map((v, i) => v === null ? null : v), borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.08)', fill: true, tension: 0.25, pointRadius: 0, borderWidth: 2 }];
+  const rawVals = values.filter(v => v !== null && v !== undefined);
+  let yMin = 0, yMax = 100;
+  if (!isScoreChart && rawVals.length) {
+    const lo = Math.min(...rawVals), hi = Math.max(...rawVals);
+    const pad = (hi - lo) * 0.15 || 1;
+    yMin = lo - pad; yMax = hi + pad;
+  }
   new Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: {
-      labels,
-      datasets: [
-        { label: '评分', data: scores, borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.08)', fill: true, tension: 0.25, pointRadius: 0, borderWidth: 2 },
-        { label: '加速线 40', data: scores.map(() => 40), borderColor: 'rgba(40,167,69,0.55)', borderDash: [4, 4], pointRadius: 0, borderWidth: 1 },
-        { label: '高位线 75', data: scores.map(() => 75), borderColor: 'rgba(220,53,69,0.5)', borderDash: [4, 4], pointRadius: 0, borderWidth: 1 },
-      ],
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { intersect: false, mode: 'index' },
+      parsing: false,
       scales: {
-        y: { min: 0, max: 100, ticks: { stepSize: 25, font: { size: 10 } }, grid: { color: 'rgba(0,0,0,0.05)' } },
+        y: { min: yMin, max: yMax, ticks: { stepSize: isScoreChart ? 25 : undefined, font: { size: 10 } }, grid: { color: 'rgba(0,0,0,0.05)' } },
         x: { ticks: { maxTicksLimit: 6, font: { size: 10 } }, grid: { display: false } },
       },
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y}` } } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const pt = points[c.dataIndex];
+              const base = `${c.dataset.label}: ${pt.v !== null && pt.v !== undefined ? Number(pt.v).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '--'}`;
+              return pt.s !== null && pt.s !== undefined ? `${base}　得分 ${pt.s}` : base;
+            },
+          },
+        },
+      },
     },
   });
 }
+// 指标切换按钮（事件委托，容器常驻）
+document.addEventListener('click', function (e) {
+  const b = e.target.closest('#indicatorTabs button');
+  if (!b) return;
+  const modal = document.getElementById('targetModal');
+  if (!modal || !modal.dataset.targetId) return;
+  _selIndicator[modal.dataset.targetId] = b.dataset.tab;
+  renderScoreHistory(modal.dataset.targetId);
+});
 
 async function fetchData(isRefresh = false) {
     if (appState.isRefreshing) return;

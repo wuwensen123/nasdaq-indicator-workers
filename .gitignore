@@ -5,3 +5,7 @@ wrangler.toml
 .wrangler/
 credentials.md
 *.tmp.json
+# 回填脚本生成的 SQL 产物（数据在 D1，不入库）
+worker/backfill_*.sql
+# 本地 preview/编辑器配置
+.claude/

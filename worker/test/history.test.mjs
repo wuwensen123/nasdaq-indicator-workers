@@ -68,9 +68,34 @@ test('GET /api/history groups rows by target', async () => {
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.success, true);
-  assert.equal(body.history.qqq.length, 2);
-  assert.equal(body.history.qqq[1].score, 64.1);
-  assert.equal(body.history.voo.length, 1);
+  assert.equal(body.history.qqq.series.length, 2);
+  assert.equal(body.history.qqq.series[1].score, 64.1);
+  assert.deepEqual(body.history.qqq.indicators, {});
+  assert.equal(body.history.voo.series.length, 1);
+});
+
+test('GET /api/history returns per-indicator series with value and score', async () => {
+  const { env } = mockD1({
+    historyRows: [
+      {
+        target_id: 'qqq', date: '2026-11-10', composite_score: 63.5, multiple: 1,
+        indicators: JSON.stringify({ 'PE综合估值': { v: 28.1, s: 66 }, 'CAPE周期调整市盈率': { v: 40.0, s: 98 } }),
+      },
+      {
+        target_id: 'qqq', date: '2026-11-11', composite_score: 64.1, multiple: 1,
+        indicators: JSON.stringify({ 'PE综合估值': { v: 28.4, s: 68 }, 'CAPE周期调整市盈率': { v: 40.2, s: 98 } }),
+      },
+      // 坏 JSON 行不影响其它行
+      { target_id: 'voo', date: '2026-11-11', composite_score: 74.2, multiple: 1, indicators: '{{{not-json' },
+    ],
+  });
+  const res = await worker.fetch(new Request('https://x/api/history?days=90'), env, { waitUntil() {} });
+  const body = await res.json();
+  const pe = body.history.qqq.indicators['PE综合估值'];
+  assert.equal(pe.length, 2);
+  assert.deepEqual(pe[1], { date: '2026-11-11', v: 28.4, s: 68 });
+  assert.equal(body.history.qqq.indicators['CAPE周期调整市盈率'].length, 2);
+  assert.deepEqual(body.history.voo.indicators, {});
 });
 
 test('GET /api/history returns empty object when table missing', async () => {
