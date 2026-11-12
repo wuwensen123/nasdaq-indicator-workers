@@ -36,10 +36,15 @@
 - 口径交叉验证：StockAnalysis 当日值 vs historyofmarket forwardOwn：NDX 19.80 vs 19.56（+1.2%）、SPX 18.53 vs 18.47（+0.3%）。
 - 失败兜底：序列抓取失败时回退原静态锚点表（`静态锚点表(无历史序列时兜底)` 标注）。
 
-### 2.3 Baa
+### 2.3 Baa（FRED key 已配置并验证）
 
-- 当前 `baa_yield.value = null`（未配置 FRED key，属预期）；`EY spread vs Baa` 显示 `JPM锚(2026-09-30)+10Y调整`（−1.10%），兜底路径正常。
-- **待用户操作**：注册免费 FRED API key（https://fred.stlouisfed.org/docs/api/api_key.html），在 Cloudflare 配置 Worker secret `FRED_API_KEY`，下次 refresh 即切换为每日真值（source 变为 `FRED API (DBAA)`）。
+- 用户已注册免费 FRED API key 并配置为 Worker secret `FRED_API_KEY`（2026-11-12）。
+- 生产实测：`baa_yield = 6.39%`，`source = FRED API (DBAA)`，观测日 2026-11-09 —— **每日真值已生效**。
+- EY spread 切换前后对比（JPM 锚 → FRED 真值）：
+  - QQQ：−1.10% → **−1.53%**（分数 73.30 → 78.89）
+  - VOO：−0.42% → **−1.00%**（分数 64.52 → 72.00）
+- 真值 6.39% 比 JPM 锚推算值（约 5.94%）高约 45bp，说明近期信用利差走阔，锚点近似确有偏差——真值路径修正了这一点。
+- 综合评分影响：QQQ 64.17 → 64.73，VOO 74.16 → 74.89（均维持 1x）。
 
 ### 2.4 其他
 
@@ -67,7 +72,7 @@ curl /api/refresh        # success, 9.0s
 
 ## 5. 已知遗留
 
-1. **FRED key 未配置**：Baa 仍为 JPM 锚近似（季度校准），配置 key 后自动切换每日真值。
+1. ~~FRED key 未配置~~ **已解决（2026-11-12）**：key 已配置，Baa 切换每日真值 6.39%（见 2.3）。
 2. 东财个股 PB 序列起点 2018-01（更早历史东财接口不提供），银行分位是"2018 以来"口径。
 3. historyofmarket 为第三方聚合源（CC BY 4.0，允许数据再使用并署名），需观察其长期稳定性；失败时静态表兜底。
 4. 银行 PB 分位与 `stock_pb` 绝对锚点表（权重 0.20）并存：前者是相对分位、后者是绝对水平，互补设计未变。
