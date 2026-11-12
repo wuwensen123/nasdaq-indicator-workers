@@ -315,10 +315,21 @@ export class Analyzer {
       return { value: v, score: v };
     }
     if (key === 'pb_pct_hist') {
+      // 优先个股自身历史 PB 分位（东方财富估值分析，2018 至今；银行不再共享中证银行指数分位）
+      const indiv = td.pb_pct_hist;
+      if (indiv?.pct != null && indiv.count >= 100) {
+        return {
+          value: indiv.current_pb ?? td.pb ?? null,
+          score: round(indiv.pct * 100),
+          source: indiv.source ?? '东方财富',
+          as_of: indiv.updated_at ?? indiv.fetched_at ?? null,
+          note: `个股PB历史分位（${indiv.count}个交易日，2018以来）`,
+        };
+      }
       const jq = this._jq(cfg, global);
-      if (jq) return { value: jq.pb ?? null, score: jq.pb_pct ?? null };
+      if (jq) return { value: jq.pb ?? null, score: jq.pb_pct ?? null, note: '指数PB历史分位（韭圈儿）' };
       const dj = global.danjuan?.map?.[cfg.dj_index];
-      return { value: dj?.pb ?? null, score: dj?.pb_pct ?? null };
+      return { value: dj?.pb ?? null, score: dj?.pb_pct ?? null, note: '指数PB历史分位（蛋卷）' };
     }
     if (key === 'erp_hk') {
       const dj = global.danjuan?.map?.[cfg.dj_index];
@@ -765,7 +776,7 @@ export class Analyzer {
       gold_real_pct: { name: '黄金实际价格分位', desc: '金价÷CPI后的50年历史分位——无现金流资产的长周期估值锚' },
       dxy_pct: { name: '美元指数5年分位', desc: '美元越强，以美元计价的黄金越承压（反向驱动）' },
       pe_pct_hist: { name: 'PE历史分位', desc: '指数市盈率历史分位（韭圈儿/蛋卷基金口径，10年或上市以来），估值主锚' },
-      pb_pct_hist: { name: 'PB历史分位', desc: '市净率历史分位（韭圈儿/蛋卷基金口径，10年或上市以来）' },
+      pb_pct_hist: { name: 'PB历史分位', desc: '银行股用个股自身历史分位（东方财富2018至今）；其他用韭圈儿/蛋卷指数口径' },
       forward_pe: { name: 'Forward P/E', desc: '未来12个月预期市盈率（StockAnalysis日更；交叉验证：JPM 2026-09-30 S&P 19.0x、SPY单张FY1 20.38x、Siblis NDX 21.24x）' },
       ey_spread_baa: { name: 'EY spread vs Baa', desc: '盈利收益率−穆迪Baa公司债收益率（JPM估值表口径）；Baa优先FRED DBAA，失败时用JPM 2026-09-30隐含6.26%+10Y调整；负值=股票相对信用债偏贵' },
       erp_hk: { name: '港股ERP', desc: '盈利收益率−美债10Y（港币联系汇率下美债即港股无风险利率），中金口径' },

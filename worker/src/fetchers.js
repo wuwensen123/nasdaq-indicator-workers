@@ -95,6 +95,72 @@ export class Fetcher {
     } catch {}
   }
 
+  // ========== 银行个股 PB 历史分位（东方财富估值分析，2018 至今，每日一条） ==========
+  // 之前 pb_pct_hist 用中证银行指数分位（四行共享），这里换成分股自身历史序列
+  static get BANK_EM_CODES() { return { abc_bank: '601288', ccb_bank: '601939', cmb_bank: '600036' }; }
+
+  async getBankPbHistory(code, year) {
+    const url = `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_VALUEANALYSIS_DET&columns=TRADE_DATE,PB_MRQ&filter=(SECURITY_CODE%3D%22${code}%22)(TRADE_DATE%3E%3D%27${year}-01-01%27)(TRADE_DATE%3C%3D%27${year}-12-31%27)&pageSize=500&sortColumns=TRADE_DATE&sortTypes=1`;
+    const d = await fetchJSON(url);
+    const rows = d?.result?.data ?? [];
+    return rows
+      .filter(r => r.PB_MRQ != null && !isNaN(parseFloat(r.PB_MRQ)))
+      .map(r => ({ date: String(r.TRADE_DATE).slice(0, 10), pb: parseFloat(r.PB_MRQ) }));
+  }
+
+  // 当前值在历史序列中的分位（0-1）；边界：<=min→0、>=max→1
+  _pctRank(values, current) {
+    if (!values?.length || current == null) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    if (current <= sorted[0]) return 0;
+    const n = sorted.length;
+    // 线性插值分位：比 current 小的占多少（含等值）
+    let le = 0;
+    for (const v of sorted) { if (v <= current) le++; else break; }
+    return le / n;
+  }
+
+  // 全量刷新：3 家银行 × 2018..今，逐年请求（已有年份跳过），算分位，写 D1
+  async refreshBankPbPercentiles(env) {
+    const codes = Fetcher.BANK_EM_CODES;
+    const nowYear = new Date().getUTCFullYear();
+    const updated = {};
+    for (const [id, code] of Object.entries(codes)) {
+      try {
+        const cached = await this.getValuationCache(env, `bank_pb_hist:${id}`);
+        const points = (cached?.data?.points ?? []).map(p => ({ date: String(p.d), pb: p.pb }));
+        for (let year = 2018; year <= nowYear; year++) {
+          const y = String(year);
+          if (!points.some(p => p.date.startsWith(y))) {
+            const rows = await this.getBankPbHistory(code, y);
+            for (const r of rows) if (!points.some(p => p.date === r.date)) points.push(r);
+          }
+        }
+        points.sort((a, b) => a.date < b.date ? -1 : 1);
+        if (!points.length) { updated[id] = false; continue; }
+        const pbs = points.map(p => p.pb);
+        const sorted = [...pbs].sort((a, b) => a - b);
+        const current = pbs[pbs.length - 1];
+        const pct = this._pctRank(pbs, current);
+        const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
+        await this.setValuationCache(env, `bank_pb_hist:${id}`, { points: points.map(p => ({ d: p.date, pb: p.pb })) });
+        await this.setValuationCache(env, `bank_pb_pct:${id}`, {
+          pct, current_pb: current, count: points.length, median,
+          source: '东方财富估值分析(RPT_VALUEANALYSIS_DET,2018至今)', updated_at: new Date().toISOString(),
+        });
+        updated[id] = true;
+      } catch (e) { updated[id] = false; }
+    }
+    return { updated, at: new Date().toISOString() };
+  }
+
+  // refresh 流程只读 D1，不现场抓（节省子请求配额）
+  async getBankPbPercentile(env, id) {
+    if (!Fetcher.BANK_EM_CODES[id]) return null;
+    const c = await this.getValuationCache(env, `bank_pb_pct:${id}`);
+    return c ? { ...c.data, fetched_at: c.fetched_at } : null;
+  }
+
   // ========== VIX ==========
   // 进程内短缓存：同一次 refresh 里 put_call 兜底会重复调用，省子请求
   async getVIX() {

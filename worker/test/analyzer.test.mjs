@@ -95,3 +95,30 @@ test('QQQ strategic result includes tactical block and new indicators', () => {
   assert.equal(r.indicators.find(i => i.name === 'Forward P/E').source, 'Yahoo Finance');
   assert.equal(typeof r.composite_score, 'number');
 });
+
+test('bank pb_pct_hist prefers per-stock percentile over index-wide', () => {
+  const a = new Analyzer();
+  const global = { danjuan: { map: { '中证银行': { pb: 0.9, pb_pct: 0.72 } }, source: 'danjuan' } };
+  const data = {
+    abc_bank: {
+      pb: 0.88,
+      pb_data: { source: '腾讯' },
+      pb_pct_hist: { pct: 0.087, current_pb: 0.88, count: 2160, median: 1.02, source: '东方财富估值分析(RPT_VALUEANALYSIS_DET,2018至今)', updated_at: '2026-11-12T07:30:00Z' },
+      technical: { ma200_pct: 7.45 },
+    },
+  };
+  const r = a.analyzeTarget('abc_bank', data, global);
+  const ind = r.indicators.find(i => i.name === 'PB历史分位');
+  assert.equal(ind.score, 8.7); // 0.087*100
+  assert.match(ind.source, /东方财富/);
+});
+
+test('bank pb_pct_hist falls back to index percentile when per-stock missing', () => {
+  const a = new Analyzer();
+  const global = { danjuan: { map: { '中证银行': { pb: 0.9, pb_pct: 72 } }, source: 'danjuan' } };
+  const data = { abc_bank: { pb: 0.88, technical: { ma200_pct: 7.45 } } };
+  const r = a.analyzeTarget('abc_bank', data, global);
+  const ind = r.indicators.find(i => i.name === 'PB历史分位');
+  assert.equal(ind.score, 72);
+  // fallback 无个股数据时用指数分位（韭圈儿/蛋卷），score 仍为 0-100
+});

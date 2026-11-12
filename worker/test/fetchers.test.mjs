@@ -168,3 +168,37 @@ test('getValuationCache returns null when env missing', async () => {
   const fetcher = new Fetcher();
   assert.equal(await fetcher.getValuationCache(undefined, 'k'), null);
 });
+
+// ====== Task 2: 银行个股 PB 历史分位（东财 RPT_VALUEANALYSIS_DET） ======
+test('getBankPbHistory parses Eastmoney annual rows', async () => {
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    const year = /TRADE_DATE%3E%3D%27([0-9]{4})/.exec(String(url))?.[1] || '2018';
+    return mockResponse({ result: { data: [
+      { TRADE_DATE: `${year}-01-02 00:00:00`, PB_MRQ: 1.67 },
+      { TRADE_DATE: `${year}-01-03 00:00:00`, PB_MRQ: 1.69 },
+      { TRADE_DATE: `${year}-01-04 00:00:00`, PB_MRQ: 1.68 },
+    ] } });
+  };
+  const rows = await new Fetcher().getBankPbHistory('600036', '2018');
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows[0], { date: '2018-01-02', pb: 1.67 });
+  assert.ok(String(urls[0]).includes('RPT_VALUEANALYSIS_DET'));
+});
+
+test('pctRank computes percentile of current in history', () => {
+  const f = new Fetcher();
+  // 10 个等距点 1..10：current=3 → 10 个点中 ≤3 有 3 个 → 0.3
+  const vals = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  assert.ok(Math.abs(f._pctRank(vals, 3) - 0.3) < 1e-9, `pct=${f._pctRank(vals, 3)}`);
+  assert.equal(f._pctRank(vals, 0.5), 0);
+  assert.equal(f._pctRank(vals, 100), 1);
+  assert.equal(f._pctRank(vals, 3.5), 0.3); // 线性：3.5 落在 3-4 之间仍按 ≤ 计数
+});
+
+test('getBankPbPercentile returns null when cache missing', async () => {
+  globalThis.fetch = async () => { throw new Error('should not fetch'); };
+  const env = { nasdaq_cache: { prepare: () => ({ bind: () => ({ first: async () => null }) }) } };
+  assert.equal(await new Fetcher().getBankPbPercentile(env, 'abc_bank'), null);
+});

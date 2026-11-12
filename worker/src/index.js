@@ -98,7 +98,7 @@ async function setCache(env, data, fetchedAt) {
 }
 
 // 获取新鲜数据（实时抓取）
-async function fetchFreshData() {
+async function fetchFreshData(env) {
   const start = Date.now();
   const targets = analyzer.getTargets();
 
@@ -150,9 +150,14 @@ async function fetchFreshData() {
   const pbResults = await Promise.all(targets.map((t) =>
     needPB(t) ? fetcher.getStockPB(t.symbol) : Promise.resolve({ value: null })
   ));
+  // 银行个股 PB 历史分位：只读 D1 缓存（scheduled 7:30 已刷新），不占子请求配额
+  const bankPctResults = await Promise.all(targets.map((t) =>
+    t.strategic && t.type.includes('银行') ? fetcher.getBankPbPercentile(env, t.id) : Promise.resolve(null)
+  ));
   for (let i = 0; i < targets.length; i++) {
     targetsData[targets[i].id] = {
       name: targets[i].name, symbol: targets[i].symbol,
+      pb_pct_hist: bankPctResults[i] ?? null,
       // 中国个股的 PE 由东财 PB 请求顺带返回（f162），避免额外 Yahoo crumb 子请求
       pe_ratio: peMap[targets[i].id]?.value ?? pbResults[i]?.pe ?? null,
       forward_pe: fwdMap[targets[i].id]?.value ?? peMap[targets[i].id]?.forward_pe ?? null,
@@ -222,7 +227,7 @@ export default {
       // 强制刷新：实时抓取并更新缓存
       if (isRefresh) {
         try {
-          const freshData = await fetchFreshData();
+          const freshData = await fetchFreshData(env);
           await setCache(env, freshData, freshData.fetched_at);
           freshData.refreshed = true;
           freshData.from_cache = false;
@@ -244,7 +249,7 @@ export default {
 
       // 无缓存：实时抓取
       try {
-        const freshData = await fetchFreshData();
+        const freshData = await fetchFreshData(env);
         // 异步写入缓存，不阻塞响应
         ctx.waitUntil(setCache(env, freshData, freshData.fetched_at));
         return json(freshData);
@@ -441,8 +446,15 @@ export default {
       // 7:30 / 14:30 — 指标数据抓取
       console.log(`[Scheduler] 开始定时抓取数据 at ${time}`);
       try {
-        const freshData = await fetchFreshData();
+        const freshData = await fetchFreshData(env);
         await setCache(env, freshData, freshData.fetched_at);
+        // 银行个股 PB 历史分位：每日 D1 缓存刷新（refresh 流程只读缓存，不占子请求配额）
+        try {
+          const pb = await fetcher.refreshBankPbPercentiles(env);
+          console.log(`[Scheduler] 银行PB分位刷新: ${JSON.stringify(pb.updated)}`);
+        } catch (e) {
+          console.error(`[Scheduler] 银行PB分位刷新失败: ${e.message}`);
+        }
         console.log(`[Scheduler] 数据抓取完成，耗时 ${freshData.fetch_time_seconds}s`);
       } catch (e) {
         console.error(`[Scheduler] 抓取失败: ${e.message}`);
