@@ -37,6 +37,7 @@ export class Analyzer {
       { id: 'qqq', name: 'QQQ 纳斯达克100 ETF', symbol: 'QQQ', type: '美国ETF', strategic: true, pe_family: 'ndx',
         indicators: ['pe_composite', 'cape', 'forward_pe', 'erp_real', 'ey_spread_baa', 'ma200_risk'],
         weights: { pe_composite: 0.30, cape: 0.15, forward_pe: 0.15, erp_real: 0.20, ey_spread_baa: 0.10, ma200_risk: 0.10 }, pe_normal: 25,
+        extra_ohlc: { ndx: '^NDX' },
         method_note: 'QQQ的S&P CAPE只作代理，权重从30%降至15%；Forward PE(15%)与EY spread vs Baa(10%)补足12个月估值与信用调整；用实际股权风险溢价（盈利收益率−TIPS实际利率）替代名义ERP，避免Fed模型通胀幻觉' },
       { id: 'voo', name: 'VOO 标普500 ETF', symbol: 'VOO', type: '美国ETF', strategic: true, pe_family: 'spx',
         indicators: ['pe_composite', 'cape', 'forward_pe', 'erp_real', 'ey_spread_baa', 'ma200_risk'],
@@ -109,7 +110,18 @@ export class Analyzer {
 
     return {
       target_id: targetId, target_name: cfg.name, target_type: cfg.type, symbol: cfg.symbol,
-      current_price: td.current_price, day_ohlc: td.day_ohlc ?? null, composite_score: composite, market_position: pos.label,
+      current_price: td.current_price, day_ohlc: td.day_ohlc ?? null,
+      extra_prices: cfg.extra_ohlc
+        ? Object.keys(cfg.extra_ohlc).map(k => {
+            const x = td.extra_ohlc?.[k];
+            if (!x) return null;
+            const name = this._indInfo(k + '_price').name;
+            if (x.day_ohlc) return { name, v: x.day_ohlc.c, o: x.day_ohlc.o, h: x.day_ohlc.h, l: x.day_ohlc.l, d: x.day_ohlc.d };
+            if (x.current_price != null) return { name, v: x.current_price };
+            return null;
+          }).filter(Boolean)
+        : undefined,
+      composite_score: composite, market_position: pos.label,
       position_color: pos.color, strategy, indicators,
       formula: `综合评分 = ${cfg.indicators.map(i => `${this._indName(i)}×${cfg.weights[i]*100}%`).join(' + ')}`,
       formula_detail: '0=强烈买入 → 100=强烈卖出，每项指标归一化到0-100分后加权平均',
@@ -185,7 +197,18 @@ export class Analyzer {
     const srcNote = this._valuationNote(cfg, global);
     return {
       target_id: cfg.id, target_name: cfg.name, target_type: cfg.type, symbol: cfg.symbol,
-      current_price: td.current_price, day_ohlc: td.day_ohlc ?? null, composite_score: composite, market_position: pos.label,
+      current_price: td.current_price, day_ohlc: td.day_ohlc ?? null,
+      extra_prices: cfg.extra_ohlc
+        ? Object.keys(cfg.extra_ohlc).map(k => {
+            const x = td.extra_ohlc?.[k];
+            if (!x) return null;
+            const name = this._indInfo(k + '_price').name;
+            if (x.day_ohlc) return { name, v: x.day_ohlc.c, o: x.day_ohlc.o, h: x.day_ohlc.h, l: x.day_ohlc.l, d: x.day_ohlc.d };
+            if (x.current_price != null) return { name, v: x.current_price };
+            return null;
+          }).filter(Boolean)
+        : undefined,
+      composite_score: composite, market_position: pos.label,
       position_color: pos.color, strategy, indicators, tactical, sentiment,
       data_coverage: round(totalWeight * 100, 0),
       formula: `战略评分 = ${cfg.indicators.map(fw).join(' + ')}｜倍数 = 1x底仓 + 估值/回撤加速${cfg.tactical_fg !== false ? `${coeff !== 1 ? ` × 情绪${coeff}` : ''}` : '（无情绪叠加）'}`,
@@ -825,6 +848,7 @@ export class Analyzer {
       payout_ratio: { name: '派息率可持续性', direction: 'mid', desc: '派息率=股息率×PE（价格中性）。30-60%为健康区间；>75%有可持续性风险（高分预警）；<20%红利支撑弱' },
       copper_pct: { name: '铜价10年分位', direction: 'low', desc: 'COMEX铜价10年周线分位——周期股的周期位置锚。分位越低=越接近周期底部；高分=周期顶部风险（紫金PE是反向指标，不参与评分）' },
       price: { name: '价格走势', direction: 'none', desc: '标的每日收盘价（QQQ/VOO/GLD 为美元，A 股/红利低波为人民币；恒生指数为点数，红利低波 930955 用 563020 ETF 代理收盘价）。红涨绿跌蜡烛图，叠加 MA5/10/20 均线（橙/蓝/紫），支持 日K(90天)/周K(52周)/月K(60月) 切换。用于对照估值与趋势，不参与战略评分' },
+      ndx_price: { name: 'NDX指数走势', direction: 'none', ohlc_series: 'ndx', desc: '纳斯达克100指数（^NDX，QQQ 跟踪的标的指数）走势，与 QQQ 价格对照可观察 ETF 跟踪偏离。美元点位，红涨绿跌蜡烛图叠加 MA5/10/20，支持 日K(90天)/周K(52周)/月K(60月) 切换。不参与战略评分' },
     };
     return infos[k] || { name: k, desc: '', direction: 'none' };
   }
@@ -842,9 +866,9 @@ export class Analyzer {
         'pe_csi300', 'pe_stock', 'pe_utility', 'pe_mining', 'dividend_yield', 'rsi', 'ma200', 'pe_composite', 'cape',
         'erp', 'erp_real', 'ma200_risk', 'real_yield', 'gold_real_pct', 'dxy_pct', 'pe_pct_hist', 'pb_pct_hist',
         'forward_pe', 'ey_spread_baa', 'erp_hk', 'div_yield_level', 'dy_spread_cn', 'dy_carry', 'stock_pb',
-        'roe_level', 'payout_ratio', 'copper_pct', 'price']) {
+        'roe_level', 'payout_ratio', 'copper_pct', 'price', 'ndx_price']) {
         const info = this._indInfo(key);
-        if (info && info.name) map.set(info.name, { direction: info.direction ?? 'none', desc: info.desc });
+        if (info && info.name) map.set(info.name, { direction: info.direction ?? 'none', desc: info.desc, ...(info.ohlc_series ? { ohlc_series: info.ohlc_series } : {}) });
       }
       this._metaByCnName = map;
     }

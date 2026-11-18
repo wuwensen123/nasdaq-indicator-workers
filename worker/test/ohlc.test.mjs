@@ -70,6 +70,83 @@ function yahooMonthlyFixture() {
   };
 }
 
+// Yahoo 周K fixture：60 周 → slice(-52) 后首根为第 8 个点
+function yahooWeeklyFixture() {
+  const timestamps = [];
+  const open = [], high = [], low = [], close = [];
+  for (let i = 0; i < 60; i++) {
+    timestamps.push(Date.UTC(2025, 9, 6) / 1000 + i * 7 * 86400);
+    open.push(i + 1); high.push(i + 2); low.push(i + 0.5); close.push(i + 1.5);
+  }
+  return {
+    chart: {
+      result: [{
+        timestamp: timestamps,
+        indicators: { quote: [{ open, high, low, close }] },
+      }],
+    },
+  };
+}
+
+test('GET /api/ohlc series=ndx fetches Yahoo ^NDX weekly and slices to 52', async () => {
+  const saved = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    if (String(url).includes('chart/%5ENDX') && String(url).includes('interval=1wk')) return jsonResponse(yahooWeeklyFixture());
+    throw new Error('unexpected url ' + url);
+  };
+  try {
+    const { env } = mockD1();
+    const res = await worker.fetch(new Request('https://x/api/ohlc?target=qqq&period=weekly&series=ndx'), env, { waitUntil() {} });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.success, true);
+    assert.equal(body.target, 'qqq');
+    assert.equal(body.period, 'weekly');
+    assert.equal(body.candles.length, 52);
+    assert.equal(body.candles[0].o, 9);
+    assert.equal(body.candles[51].c, 60.5);
+    assert.ok(calls.some(u => u.includes('chart/%5ENDX') && u.includes('interval=1wk')));
+    assert.ok(!calls.some(u => u.includes('chart/QQQ')));
+  } finally {
+    globalThis.fetch = saved;
+  }
+});
+
+test('GET /api/ohlc rejects unknown series with 400', async () => {
+  const { env } = mockD1();
+  const res = await worker.fetch(new Request('https://x/api/ohlc?target=qqq&period=weekly&series=bogus'), env, { waitUntil() {} });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.success, false);
+  assert.match(body.error, /unknown series/);
+});
+
+test('GET /api/ohlc uses a separate cache key for series', async () => {
+  const saved = globalThis.fetch;
+  let qqqCalls = 0, ndxCalls = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('chart/QQQ')) { qqqCalls++; return jsonResponse(yahooWeeklyFixture()); }
+    if (String(url).includes('chart/%5ENDX')) { ndxCalls++; return jsonResponse(yahooWeeklyFixture()); }
+    throw new Error('unexpected url ' + url);
+  };
+  try {
+    const { env, store } = mockD1();
+    const base = 'https://x/api/ohlc?target=qqq&period=weekly';
+    await worker.fetch(new Request(base), env, { waitUntil() {} });
+    await worker.fetch(new Request(base), env, { waitUntil() {} });
+    await worker.fetch(new Request(base + '&series=ndx'), env, { waitUntil() {} });
+    await worker.fetch(new Request(base + '&series=ndx'), env, { waitUntil() {} });
+    assert.equal(qqqCalls, 1);
+    assert.equal(ndxCalls, 1);
+    assert.ok(store.has('daily:ohlc_qqq_weekly'));
+    assert.ok(store.has('daily:ohlc_qqq_ndx_weekly'));
+  } finally {
+    globalThis.fetch = saved;
+  }
+});
+
 test('GET /api/ohlc weekly uses Tencent fqkline and slices to 52 candles', async () => {
   const saved = globalThis.fetch;
   const calls = [];

@@ -136,6 +136,12 @@ export async function saveScoreHistory(env, data, dateOverride) {
         if (r.day_ohlc) { p.o = r.day_ohlc.o; p.h = r.day_ohlc.h; p.l = r.day_ohlc.l; p.d = r.day_ohlc.d; }
         ind['价格走势'] = p;
       }
+      // 附加价格序列（如 NDX指数走势）：与价格走势同格式，不参与评分
+      if (Array.isArray(r.extra_prices)) for (const ep of r.extra_prices) {
+        const p = { v: ep.v, s: null };
+        if (ep.o != null) { p.o = ep.o; p.h = ep.h; p.l = ep.l; p.d = ep.d; }
+        ind[ep.name] = p;
+      }
       return env.nasdaq_cache.prepare(
         'INSERT OR REPLACE INTO score_history (target_id, date, composite_score, multiple, indicators) VALUES (?, ?, ?, ?, ?)'
       ).bind(r.target_id, date, r.composite_score ?? null, r.strategy?.multiple ?? null, JSON.stringify(ind));
@@ -258,6 +264,12 @@ async function fetchFreshData(env) {
     targetsData[t.id].current_price = tech.current_price;
     targetsData[t.id].day_ohlc = tech.day_ohlc ?? null;
     targetsData[t.id].technical = tech;
+    // 附加价格序列（如 QQQ 的 ^NDX 指数）：同样 8h 缓存，cron 首次 +1 子请求
+    targetsData[t.id].extra_ohlc = {};
+    for (const [k, sym] of Object.entries(t.extra_ohlc || {})) {
+      targetsData[t.id].extra_ohlc[k] = await fetcher.getCachedDaily(env, 'tech_' + sym, 8,
+        () => fetcher.getTechnicalIndicators(sym), r => r && r.current_price != null);
+    }
   }
 
   for (const t of targets) {
@@ -342,13 +354,17 @@ export default {
     if (path === '/api/ohlc') {
       const target = url.searchParams.get('target') || '';
       const period = url.searchParams.get('period') || '';
+      const series = url.searchParams.get('series') || '';
       const cfg = analyzer.getTargets().find(t => t.id === target);
       if (!cfg) return error(`unknown target: ${target}`, 400);
       if (period !== 'weekly' && period !== 'monthly') return error('period must be weekly or monthly', 400);
+      if (series && !cfg.extra_ohlc?.[series]) return error(`unknown series: ${series}`, 400);
       try {
         const candles = await fetcher.getCachedDaily(
-          env, `ohlc_${target}_${period}`, period === 'weekly' ? 12 : 24,
-          () => fetcher.getOhlcSeries({ symbol: cfg.symbol, techSymbol: cfg.tech_symbol, period }),
+          env, `ohlc_${target}${series ? '_' + series : ''}_${period}`, period === 'weekly' ? 12 : 24,
+          () => series
+            ? fetcher.getOhlcSeries({ symbol: cfg.extra_ohlc[series], period })
+            : fetcher.getOhlcSeries({ symbol: cfg.symbol, techSymbol: cfg.tech_symbol, period }),
           r => Array.isArray(r) && r.length > 10
         );
         return json({ success: true, target, period, candles });

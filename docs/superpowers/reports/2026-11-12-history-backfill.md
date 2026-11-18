@@ -1,8 +1,20 @@
 # 全部指标 90 天回溯 + 历史回填 验收报告
 
 **日期:** 2026-11-12
-**版本:** v2.10.0（价格走势升级 K 线三周期）
+**版本:** v2.11.0（QQQ 新增 NDX 指数走势）
 **计划:** [2026-11-12-indicator-history-90d.md](../plans/2026-11-12-indicator-history-90d.md)、[2026-11-18-kline-three-periods.md](../plans/2026-11-18-kline-three-periods.md)
+
+## NDX 指数走势（v2.11.0）
+
+QQQ 弹窗新增「NDX指数走势」K 线按钮，与「价格走势」并列，用于对照 ETF 跟踪偏离：
+
+- **配置驱动**：qqq 配置新增 `extra_ohlc: { ndx: '^NDX' }`；analyzer 注册 `ndx_price`（名称「NDX指数走势」、`direction: 'none'`、`ohlc_series: 'ndx'`，desc 说明与 QQQ 对照可观察跟踪偏离、不参与战略评分），`getIndicatorMetaAll` 透传 `ohlc_series`
+- **快照写入**：`fetchFreshData` 按 `extra_ohlc` 逐序列拉取（Yahoo ^NDX，8 小时 D1 缓存 key `tech_^NDX`）；`analyzeTarget` / `_analyzeStrategic` 组装 `extra_prices`；`saveScoreHistory` 在「价格走势」之后写入 `{v, s:null, o, h, l, d}`（无 OHLC 时只写 v，不造假）
+- **周/月K**：`GET /api/ohlc` 新增可选 `series` 参数，未知 series 返回 400；缓存键 `daily:ohlc_{target}_{series}_{period}`，与价格 K 线 `daily:ohlc_{target}_{period}` 隔离，互不污染
+- **前端**：价格类判断从固定「价格走势」改为 `sel === '价格走势' || indicator_meta[sel].ohlc_series`；`loadOhlc` 增加 series 与指标名参数，缓存 key 含指标名（`{target}_{sel}_{period}`），避免两条价格序列串图
+- **回填**：`backfill-history.mjs` 增加 `yahooDaily('^NDX')`，QQQ 行写入 as-of OHLC；全量 2026-08-21 ~ 2026-11-18 共 990 行，QQQ 90/90 带「NDX指数走势」且 o/h/l/d 完整，其余 10 标的 900/900 无该键；周末 as-of 已验证（qqq 08-22 行 `d=2026-08-21`）
+- **数值口径**：NDX 为美元点位，11-13 收盘 27943.74；窗口内 26629.81~31224.47，QQQ/NDX 比率全程 41.07~41.16（如 QQQ 656.95 × 41.08 ≈ 27002），数据内部一致；量级高于早期预估的 22000~24000，为期间指数实际上涨所致
+- **验证**：71 个单测全绿；生产 `/api/history?days=90` QQQ 的 NDX 90 点全带 OHLC，`indicator_meta['NDX指数走势']` 为 `{direction:'none', ohlc_series:'ndx'}`，其余 10 标的无该键；`/api/ohlc` qqq weekly?series=ndx 52 根（末根 27001.79）、无 series 回归 52 根（末根 656.95）、voo series=ndx 400；Pages 源码含 NDX 特性；浏览器实测 NDX 周K 52 / 月K 60，价格走势回归正常
 
 ## 价格走势 K 线升级（v2.10.0）
 

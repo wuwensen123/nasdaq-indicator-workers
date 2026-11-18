@@ -409,17 +409,18 @@ async function loadAndRenderHistory(targetId) {
 }
 let _selIndicator = {}; // targetId -> 所选指标（默认综合评分）
 let _selPeriod = {}; // targetId -> 'daily'|'weekly'|'monthly'（默认 daily）
-let _ohlcCache = {}; // key `${targetId}_${period}` -> { ts, candles }（5 分钟）
+let _ohlcCache = {}; // key `${targetId}_${sel}_${period}` -> { ts, candles }（5 分钟）
 let _ohlcPending = {};
-async function loadOhlc(targetId, period) {
-  const key = `${targetId}_${period}`;
+async function loadOhlc(targetId, period, series = '', sel = '价格走势') {
+  // key 含指标名，防同一标的多条价格序列（价格走势 / NDX指数走势）串缓存
+  const key = `${targetId}_${sel}_${period}`;
   const cached = _ohlcCache[key];
   if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.candles;
   if (_ohlcPending[key]) return _ohlcPending[key];
   _ohlcPending[key] = (async () => {
     let candles = [];
     try {
-      const res = await fetch(`${appState.apiBase}/ohlc?target=${encodeURIComponent(targetId)}&period=${period}`);
+      const res = await fetch(`${appState.apiBase}/ohlc?target=${encodeURIComponent(targetId)}&period=${period}${series ? '&series=' + encodeURIComponent(series) : ''}`);
       const j = await res.json();
       if (j.success && Array.isArray(j.candles)) candles = j.candles;
     } catch {}
@@ -460,7 +461,8 @@ function renderScoreHistory(targetId) {
     }).join('');
   }
   const isScore = sel === '综合评分';
-  const isPrice = sel === '价格走势';
+  // 价格类指标：价格走势本身，或元数据声明了 ohlc_series 的附加序列（如 NDX指数走势）
+  const isPrice = sel === '价格走势' || !!(_historyMeta?.[sel]?.ohlc_series);
   const period = _selPeriod[targetId] || 'daily';
   const periodTabs = document.getElementById('pricePeriodTabs');
   if (periodTabs) {
@@ -486,7 +488,7 @@ function renderScoreHistory(targetId) {
       <div class="mt-1" style="font-size:0.74rem;color:var(--text-secondary);">${desc}</div>
     </div>`;
   }
-  // 价格走势：日K 只取带完整 OHLC 的点（旧快照缺 o/h/l 的点跳过；有效点 <2 → 降级折线）；周/月K 走 /api/ohlc
+  // 价格类指标（价格走势 / NDX指数走势）：日K 只取带完整 OHLC 的点（旧快照缺 o/h/l 的点跳过；有效点 <2 → 降级折线）；周/月K 走 /api/ohlc
   const wrap = document.getElementById('historyChartWrap');
   let klineCandles = null;
   if (isPrice) {
@@ -503,7 +505,7 @@ function renderScoreHistory(targetId) {
       }
       if (ohlcPts.length >= 2) klineCandles = ohlcPts;
     } else {
-      const ck = `${targetId}_${period}`;
+      const ck = `${targetId}_${sel}_${period}`;
       const cached = _ohlcCache[ck];
       if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
         klineCandles = cached.candles;
@@ -511,9 +513,9 @@ function renderScoreHistory(targetId) {
         canvas.style.display = 'none';
         if (wrap) wrap.style.height = '220px';
         if (empty) { empty.style.display = 'flex'; empty.textContent = `${period === 'weekly' ? '周K' : '月K'} 加载中…`; }
-        loadOhlc(targetId, period).then(() => {
+        loadOhlc(targetId, period, _historyMeta?.[sel]?.ohlc_series || '', sel).then(() => {
           const m = document.getElementById('targetModal');
-          if (m && m.dataset.targetId === targetId && (_selPeriod[targetId] || 'daily') === period && (_selIndicator[targetId] || '综合评分') === '价格走势') renderScoreHistory(targetId);
+          if (m && m.dataset.targetId === targetId && (_selPeriod[targetId] || 'daily') === period && (_selIndicator[targetId] || '综合评分') === sel) renderScoreHistory(targetId);
         });
         return;
       }

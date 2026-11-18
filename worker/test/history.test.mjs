@@ -120,6 +120,23 @@ test('saveScoreHistory writes OHLC for 价格走势 when day_ohlc present', asyn
   assert.deepEqual(parsed['价格走势'], { v: 689.52, s: null, o: 685.1, h: 690.2, l: 684.3, d: '2026-11-17' });
 });
 
+test('saveScoreHistory writes extra_prices as indicators', async () => {
+  const { env, written } = mockD1();
+  const data = {
+    analysis: {
+      results: [{
+        target_id: 'qqq', composite_score: 62, strategy: { multiple: 1 },
+        current_price: 656.95,
+        extra_prices: [{ name: 'NDX指数走势', v: 23800.5, o: 23700, h: 23850, l: 23600, d: '2026-11-17' }],
+        indicators: [],
+      }],
+    },
+  };
+  await saveScoreHistory(env, data, '2026-11-18');
+  const parsed = JSON.parse(written.find(w => w.sql.includes('INSERT OR REPLACE INTO score_history')).args[4]);
+  assert.deepEqual(parsed['NDX指数走势'], { v: 23800.5, s: null, o: 23700, h: 23850, l: 23600, d: '2026-11-17' });
+});
+
 test('saveScoreHistory writes price-only when day_ohlc missing', async () => {
   const { env, written } = mockD1();
   const data = {
@@ -218,6 +235,25 @@ test('GET /api/history returns indicator_meta with direction and desc', async ()
   assert.equal(body.indicator_meta['VIX波动率'].direction, 'low');
   assert.equal(body.indicator_meta['实际股权风险溢价'].direction, 'high'); // 未出现的指标也应在元数据表内
   assert.equal(body.indicator_meta['派息率可持续性'].direction, 'mid');
+});
+
+test('GET /api/history exposes ohlc_series metadata for NDX指数走势', async () => {
+  const { env } = mockD1({
+    historyRows: [{
+      target_id: 'qqq', date: '2026-11-17', composite_score: 60, multiple: 1,
+      indicators: JSON.stringify({ 'NDX指数走势': { v: 23800.5, s: null, o: 23700, h: 23850, l: 23600, d: '2026-11-17' } }),
+    }],
+  });
+  const res = await worker.fetch(new Request('https://x/api/history?days=90'), env, { waitUntil() {} });
+  const body = await res.json();
+  const m = body.indicator_meta['NDX指数走势'];
+  assert.equal(m.direction, 'none');
+  assert.equal(m.ohlc_series, 'ndx');
+  assert.ok(m.desc.includes('跟踪偏离'));
+  const pt = body.history.qqq.indicators['NDX指数走势'][0];
+  assert.equal(pt.o, 23700);
+  assert.equal(pt.d, '2026-11-17');
+  assert.equal(body.indicator_meta['价格走势'].ohlc_series, undefined);
 });
 
 test('GET /api/history returns empty object when table missing', async () => {

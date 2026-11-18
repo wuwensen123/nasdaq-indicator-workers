@@ -228,10 +228,10 @@ console.log(`回填窗口: ${START} ~ ${END}`);
 console.log('抓取序列...');
 
 const manual = {};
-const [baa, dgs10, tips, shiller, fwdNdx, fwdSpx, cpi, qqqK, vooK, gldK, hsiK, dxK, gcM, hgW, vixK, vix3mK, cnnS] = await Promise.all([
+const [baa, dgs10, tips, shiller, fwdNdx, fwdSpx, cpi, qqqK, vooK, gldK, hsiK, ndxK, dxK, gcM, hgW, vixK, vix3mK, cnnS] = await Promise.all([
   fredSeries('DBAA'), fredSeries('DGS10'), fredSeries('DFII10'), capeMonthly(),
   forwardPeSeries('ndx'), forwardPeSeries('spx'), cpiMap(),
-  yahooDaily('QQQ'), yahooDaily('VOO'), yahooDaily('GLD'), yahooDaily('^HSI'),
+  yahooDaily('QQQ'), yahooDaily('VOO'), yahooDaily('GLD'), yahooDaily('^HSI'), yahooDaily('^NDX'),
   yahooDaily('DX-Y.NYB', '5y'),
   yahooMonthly('GC=F'),
   fetchJson('https://query1.finance.yahoo.com/v8/finance/chart/HG=F?range=10y&interval=1wk').then(j => {
@@ -473,6 +473,12 @@ while (date <= END) {
       ? { o: orow.open, h: orow.high, l: orow.low, c: orow.close, d: orow.date }
       : null;
     addPriceIndicator(ind, targetsData[r.target_id], ohlc);
+    // QQQ 附加 NDX 指数走势（^NDX 本身，与 QQQ 价格对照跟踪偏离）
+    if (r.target_id === 'qqq') {
+      const nrow = asOfRow(ndxK, date);
+      if (nrow && nrow.open != null && nrow.high != null && nrow.low != null && nrow.close != null)
+        ind['NDX指数走势'] = { v: nrow.close, s: null, o: nrow.open, h: nrow.high, l: nrow.low, d: nrow.date };
+    }
     rows.push({
       target_id: r.target_id, date,
       composite_score: r.composite_score, multiple: r.strategy?.multiple ?? null,
