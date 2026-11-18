@@ -50,8 +50,8 @@ async function yahooDaily(symbol, range = '2y') {
   const j = await fetchJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d`);
   const r = j.chart?.result?.[0];
   const ts = r?.timestamp ?? [];
-  const close = r?.indicators?.quote?.[0]?.close ?? [];
-  return ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: close[i] }))
+  const q = r?.indicators?.quote?.[0] ?? {};
+  return ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), open: q.open?.[i], high: q.high?.[i], low: q.low?.[i], close: q.close?.[i] }))
     .filter(p => p.close != null && p.close > 0);
 }
 
@@ -145,7 +145,7 @@ async function tencentKline(symbol) {
   const d = await fetchJson(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${mk}${code},day,,,420,`);
   const item = d?.data?.[`${mk}${code}`];
   const rows = item?.qfqday || item?.day || [];
-  return rows.map(r => ({ date: r[0], close: parseFloat(r[2]), high: parseFloat(r[3]) }))
+  return rows.map(r => ({ date: r[0], open: parseFloat(r[1]), close: parseFloat(r[2]), high: parseFloat(r[3]), low: parseFloat(r[4]) }))
     .filter(p => !isNaN(p.close) && p.close > 0);
 }
 
@@ -296,6 +296,27 @@ if (!peQqqEps || !peVooEps) throw new Error('无法获取 trailing PE 锚');
 // ---------- 逐日重放 ----------
 const analyzer = new Analyzer();
 const targets = analyzer.getTargets().filter(t => t.strategic);
+
+// 每标的的日K OHLC 序列（与价格口径一致）：US 用 Yahoo 日线；A股/红利低波用腾讯日K（930955 走 563020 代理）
+const OHLC_SYMBOLS = { dividend_low_vol_etf: '512890.SS', dividend_low_vol_100: '563020.SS' };
+const ohlcSeriesFor = (id) => {
+  if (id === 'qqq') return qqqK;
+  if (id === 'voo') return vooK;
+  if (id === 'gld') return gldK;
+  if (id === 'hsi') return hsiK;
+  const sym = OHLC_SYMBOLS[id] || targets.find(t => t.id === id)?.symbol;
+  return cnK[sym] || [];
+};
+// as-of 取 <= date 的最近一行（返回整行，保 OHLC 与真实交易日 d）
+const asOfRow = (arr, date) => {
+  let lo = 0, hi = arr.length - 1, ans = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid].date <= date) { ans = arr[mid]; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return ans;
+};
 const rows = []; // {target_id, date, composite_score, multiple, indicators}
 
 let date = START;
@@ -447,7 +468,11 @@ while (date <= END) {
       if (st.put_call != null) ind['看跌/看涨期权比率'] = { v: st.put_call, s: null };
     }
     // 价格走势（与生产 saveScoreHistory 同逻辑；r 无 price 字段，取当日 targetsData）
-    addPriceIndicator(ind, targetsData[r.target_id]);
+    const orow = asOfRow(ohlcSeriesFor(r.target_id), date);
+    const ohlc = orow && orow.open != null && orow.high != null && orow.low != null && orow.close != null
+      ? { o: orow.open, h: orow.high, l: orow.low, c: orow.close, d: orow.date }
+      : null;
+    addPriceIndicator(ind, targetsData[r.target_id], ohlc);
     rows.push({
       target_id: r.target_id, date,
       composite_score: r.composite_score, multiple: r.strategy?.multiple ?? null,

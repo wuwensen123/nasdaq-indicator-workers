@@ -724,6 +724,15 @@ export class Fetcher {
       if (close.length) {
         // 先取最新价：部分指数（如930955）Yahoo只有单点报价、没有历史K线
         result.current_price = round(close[close.length - 1]);
+        // 最新一根完整 OHLC（找最后一个 o/h/l/c 均非空的交易日；用于快照蜡烛图）
+        const ts = quotes?.timestamp || [];
+        const q0 = quotes?.indicators?.quote?.[0] || {};
+        for (let i = ts.length - 1; i >= 0; i--) {
+          const o = q0.open?.[i], h = q0.high?.[i], l = q0.low?.[i], c = q0.close?.[i];
+          if (o == null || h == null || l == null || c == null) continue;
+          result.day_ohlc = { o: round(o, 4), h: round(h, 4), l: round(l, 4), c: round(c, 4), d: new Date(ts[i] * 1000).toISOString().slice(0, 10) };
+          break;
+        }
         if (close.length >= 50) {
           // RSI(14)
           result.rsi = round(calcRSI(close, 14));
@@ -785,8 +794,11 @@ export class Fetcher {
       const ma50 = calcMA(closes, 50);
       const high52 = Math.max(...highs.slice(-252));
       const low52 = Math.min(...lows.slice(-252));
+      const lastRow = rows[rows.length - 1];
+      const day_ohlc = lastRow ? { o: parseFloat(lastRow[1]), h: parseFloat(lastRow[3]), l: parseFloat(lastRow[4]), c: parseFloat(lastRow[2]), d: lastRow[0] } : null;
       return {
         current_price: round(current),
+        day_ohlc,
         rsi: round(calcRSI(closes, 14)),
         ma200: round(ma200), ma200_pct: round((current / ma200 - 1) * 100),
         ma50: round(ma50), ma50_pct: round((current / ma50 - 1) * 100),
@@ -797,6 +809,38 @@ export class Fetcher {
       };
     } catch { return null; }
   }
+  // ========== 周/月 K 线（价格走势升级：按需代理，不进每日快照） ==========
+  // A股走腾讯前复权 K 线（周/月键名为 qfqweek|week、qfqmonth|month）；其他走 Yahoo chart。
+  // 返回最近 52 周 / 60 月，供 /api/ohlc 使用。
+  async getOhlcSeries({ symbol, techSymbol, period }) {
+    const sym = techSymbol || symbol;
+    const n = period === 'weekly' ? 52 : 60;
+    if (/\.(SS|SZ)$/.test(sym)) {
+      const code = sym.replace('.SS', '').replace('.SZ', '');
+      const mk = sym.endsWith('.SS') ? 'sh' : 'sz';
+      const tok = period === 'weekly' ? 'week' : 'month';
+      const d = await fetchJSON(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${mk}${code},${tok},,,400,`);
+      const item = d?.data?.[`${mk}${code}`];
+      const rows = item?.[`qfq${tok}`] || item?.[tok] || [];
+      const candles = rows.map(r => ({ date: r[0], o: +r[1], c: +r[2], h: +r[3], l: +r[4] }))
+        .filter(c => c.date && [c.o, c.h, c.l, c.c].every(v => Number.isFinite(v)));
+      return candles.slice(-n);
+    }
+    const range = period === 'weekly' ? '5y' : '10y';
+    const interval = period === 'weekly' ? '1wk' : '1mo';
+    const d = await fetchJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=${range}&interval=${interval}`);
+    const r = d.chart?.result?.[0];
+    const ts = r?.timestamp || [];
+    const q = r?.indicators?.quote?.[0] || {};
+    const candles = [];
+    for (let i = 0; i < ts.length; i++) {
+      const o = q.open?.[i], h = q.high?.[i], l = q.low?.[i], c = q.close?.[i];
+      if (o == null || h == null || l == null || c == null) continue;
+      candles.push({ date: new Date(ts[i] * 1000).toISOString().slice(0, 10), o, c, h, l });
+    }
+    return candles.slice(-n);
+  }
+
 // ========== 股息率（中国 A 股） ==========
   async getDividendYield(symbol, peRatio, stockType) {
     // 方案0: 腾讯财经字段64（TTM股息率），与 getStockPB 共用同一快照

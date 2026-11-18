@@ -216,6 +216,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
 <script>
 let appState = { data: null, charts: [], isRefreshing: false, autoRefreshInterval: null, apiBase: 'https://api.motris.dpdns.org/api' };
 
@@ -359,7 +361,8 @@ function showTargetDetail(targetId) {
       <div class="mt-3">
         <h6 style="color:var(--text-primary);margin-bottom:8px;">90 天指标回溯</h6>
         <div id="indicatorTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
-        <div style="height:150px;position:relative;">
+        <div id="pricePeriodTabs" style="display:none;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
+        <div id="historyChartWrap" style="height:150px;position:relative;">
           <canvas id="scoreHistoryChart"></canvas>
           <div id="scoreHistoryEmpty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:0.82rem;color:var(--text-secondary);"></div>
         </div>
@@ -405,6 +408,27 @@ async function loadAndRenderHistory(targetId) {
   renderScoreHistory(targetId);
 }
 let _selIndicator = {}; // targetId -> 所选指标（默认综合评分）
+let _selPeriod = {}; // targetId -> 'daily'|'weekly'|'monthly'（默认 daily）
+let _ohlcCache = {}; // key `${targetId}_${period}` -> { ts, candles }（5 分钟）
+let _ohlcPending = {};
+async function loadOhlc(targetId, period) {
+  const key = `${targetId}_${period}`;
+  const cached = _ohlcCache[key];
+  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.candles;
+  if (_ohlcPending[key]) return _ohlcPending[key];
+  _ohlcPending[key] = (async () => {
+    let candles = [];
+    try {
+      const res = await fetch(`${appState.apiBase}/ohlc?target=${encodeURIComponent(targetId)}&period=${period}`);
+      const j = await res.json();
+      if (j.success && Array.isArray(j.candles)) candles = j.candles;
+    } catch {}
+    _ohlcCache[key] = { ts: Date.now(), candles };
+    delete _ohlcPending[key];
+    return candles;
+  })();
+  return _ohlcPending[key];
+}
 // 指标方向：'low'=越低越好 'high'=越高越好 'mid'=适中为好 'none'=仅参考
 const DIR_INFO = {
   low:  { label: '越低越好', color: '#16a34a', icon: '↓' },
@@ -436,9 +460,19 @@ function renderScoreHistory(targetId) {
     }).join('');
   }
   const isScore = sel === '综合评分';
-  const points = isScore
-    ? scoreSeries.map(p => ({ date: p.date, v: p.score, s: null }))
-    : (indMap[sel] || []).filter(p => p.v !== null || p.s !== null);
+  const isPrice = sel === '价格走势';
+  const period = _selPeriod[targetId] || 'daily';
+  const periodTabs = document.getElementById('pricePeriodTabs');
+  if (periodTabs) {
+    if (isPrice) {
+      periodTabs.style.display = 'flex';
+      periodTabs.innerHTML = [['daily', '日K'], ['weekly', '周K'], ['monthly', '月K']].map(([v, n]) =>
+        `<button type="button" class="hist-tab${v === period ? ' active' : ''}" data-period="${v}" style="border:1px solid var(--border-color);background:${v === period ? '#2563eb' : 'rgba(0,0,0,0.03)'};color:${v === period ? '#fff' : 'var(--text-primary)'};border-radius:12px;padding:2px 10px;font-size:0.74rem;cursor:pointer;">${n}</button>`
+      ).join('');
+    } else {
+      periodTabs.style.display = 'none';
+    }
+  }
   // 当前选中指标的解释区（图表外部独立区域）
   const explainEl = document.getElementById('indicatorExplain');
   if (explainEl) {
@@ -452,6 +486,55 @@ function renderScoreHistory(targetId) {
       <div class="mt-1" style="font-size:0.74rem;color:var(--text-secondary);">${desc}</div>
     </div>`;
   }
+  // 价格走势：日K 只取带完整 OHLC 的点（旧快照缺 o/h/l 的点跳过；有效点 <2 → 降级折线）；周/月K 走 /api/ohlc
+  const wrap = document.getElementById('historyChartWrap');
+  let klineCandles = null;
+  if (isPrice) {
+    const pricePts = (indMap[sel] || []).filter(p => p.v != null);
+    if (period === 'daily') {
+      const seen = new Set();
+      const ohlcPts = [];
+      for (const p of pricePts) {
+        if (p.o == null || p.h == null || p.l == null) continue;
+        const key = p.d || p.date;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        ohlcPts.push({ date: key, o: p.o, h: p.h, l: p.l, c: p.v });
+      }
+      if (ohlcPts.length >= 2) klineCandles = ohlcPts;
+    } else {
+      const ck = `${targetId}_${period}`;
+      const cached = _ohlcCache[ck];
+      if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+        klineCandles = cached.candles;
+      } else {
+        canvas.style.display = 'none';
+        if (wrap) wrap.style.height = '220px';
+        if (empty) { empty.style.display = 'flex'; empty.textContent = `${period === 'weekly' ? '周K' : '月K'} 加载中…`; }
+        loadOhlc(targetId, period).then(() => {
+          const m = document.getElementById('targetModal');
+          if (m && m.dataset.targetId === targetId && (_selPeriod[targetId] || 'daily') === period && (_selIndicator[targetId] || '综合评分') === '价格走势') renderScoreHistory(targetId);
+        });
+        return;
+      }
+    }
+  }
+  if (klineCandles) {
+    if (klineCandles.length < 2) {
+      canvas.style.display = 'none';
+      if (empty) { empty.style.display = 'flex'; empty.textContent = `${period === 'weekly' ? '周K' : '月K'}暂无数据`; }
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+    canvas.style.display = 'block';
+    if (wrap) wrap.style.height = '220px';
+    renderKline(canvas, klineCandles, period);
+    return;
+  }
+  if (wrap) wrap.style.height = '150px';
+  const points = isScore
+    ? scoreSeries.map(p => ({ date: p.date, v: p.score, s: null }))
+    : (indMap[sel] || []).filter(p => p.v !== null || p.s !== null);
   if (points.length < 2) {
     canvas.style.display = 'none';
     if (empty) {
@@ -509,6 +592,70 @@ function renderScoreHistory(targetId) {
     },
   });
 }
+// 蜡烛 K 线：红涨绿跌 + MA5/10/20（前端现算）
+function renderKline(canvas, candles, period) {
+  const existing = Chart.getChart(canvas);
+  if (existing) existing.destroy();
+  const fmt = (v) => v == null ? '--' : Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+  const xs = candles.map(c => new Date(c.date + 'T00:00:00Z').getTime());
+  const closes = candles.map(c => c.c);
+  const maOf = (n) => candles.map((_, i) => i < n - 1 ? null : closes.slice(i - n + 1, i + 1).reduce((a, b) => a + b, 0) / n);
+  const ma5 = maOf(5), ma10 = maOf(10), ma20 = maOf(20);
+  const ohlcData = candles.map((c, i) => ({ x: xs[i], o: c.o, h: c.h, l: c.l, c: c.c }));
+  const maData = (arr) => candles.map((c, i) => ({ x: xs[i], y: arr[i] }));
+  const unit = period === 'daily' ? 'day' : period === 'weekly' ? 'week' : 'month';
+  const fUp = '#dc2626', fDown = '#16a34a', fFlat = '#9ca3af';
+  // chartjs-chart-financial 0.2.1 在像素坐标里判断 close<open：像素 y 向下增大，
+  // close 像素小于 open 像素代表价格上涨，走 up 色槽；因此 up=红、down=绿即「红涨绿跌」
+  const candleBg = { up: fUp, down: fDown, unchanged: fFlat };
+  const candleBorder = { up: fUp, down: fDown, unchanged: fFlat };
+  const maDs = (label, color, arr) => ({
+    type: 'line', label, data: maData(arr), borderColor: color, backgroundColor: color,
+    borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, tension: 0, spanGaps: false,
+  });
+  new Chart(canvas.getContext('2d'), {
+    type: 'candlestick',
+    data: {
+      datasets: [
+        {
+          label: 'K线', data: ohlcData,
+          backgroundColors: candleBg,
+          borderColors: candleBorder,
+          borderWidth: 1,
+        },
+        maDs('MA5', '#f59e0b', ma5),
+        maDs('MA10', '#3b82f6', ma10),
+        maDs('MA20', '#a855f7', ma20),
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { intersect: false, mode: 'index' },
+      scales: {
+        x: { type: 'time', time: { unit }, ticks: { maxTicksLimit: 6, font: { size: 10 } }, grid: { display: false } },
+        y: { ticks: { font: { size: 10 } }, grid: { color: 'rgba(0,0,0,0.05)' } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => items.length ? new Date(items[0].parsed.x).toISOString().slice(0, 10) : '',
+            label: (c) => {
+              const raw = c.raw || {};
+              if (raw.o != null && raw.h != null && raw.l != null && raw.c != null) {
+                return [`开 ${fmt(raw.o)}`, `高 ${fmt(raw.h)}`, `低 ${fmt(raw.l)}`, `收 ${fmt(raw.c)}`];
+              }
+              return `${c.dataset.label}: ${fmt(c.parsed?.y)}`;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
 // 指标切换按钮（事件委托，容器常驻）
 document.addEventListener('click', function (e) {
   const b = e.target.closest('#indicatorTabs button');
@@ -516,6 +663,16 @@ document.addEventListener('click', function (e) {
   const modal = document.getElementById('targetModal');
   if (!modal || !modal.dataset.targetId) return;
   _selIndicator[modal.dataset.targetId] = b.dataset.tab;
+  renderScoreHistory(modal.dataset.targetId);
+});
+
+// 日K/周K/月K 周期切换
+document.addEventListener('click', function (e) {
+  const b = e.target.closest('#pricePeriodTabs button');
+  if (!b) return;
+  const modal = document.getElementById('targetModal');
+  if (!modal || !modal.dataset.targetId) return;
+  _selPeriod[modal.dataset.targetId] = b.dataset.period;
   renderScoreHistory(modal.dataset.targetId);
 });
 

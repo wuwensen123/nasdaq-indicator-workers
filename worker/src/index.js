@@ -130,7 +130,12 @@ export async function saveScoreHistory(env, data, dateOverride) {
         if (st.put_call != null) ind['看跌/看涨期权比率'] = { v: st.put_call, s: null };
       }
       // 价格走势（该标的每日收盘价，供 90 天回溯对照；不参与评分）
-      if (r.current_price != null) ind['价格走势'] = { v: r.current_price, s: null };
+      // 有当日 OHLC 时一并存蜡烛图字段（v 仍为收盘价，向后兼容）
+      if (r.current_price != null) {
+        const p = { v: r.current_price, s: null };
+        if (r.day_ohlc) { p.o = r.day_ohlc.o; p.h = r.day_ohlc.h; p.l = r.day_ohlc.l; p.d = r.day_ohlc.d; }
+        ind['价格走势'] = p;
+      }
       return env.nasdaq_cache.prepare(
         'INSERT OR REPLACE INTO score_history (target_id, date, composite_score, multiple, indicators) VALUES (?, ?, ?, ?, ?)'
       ).bind(r.target_id, date, r.composite_score ?? null, r.strategy?.multiple ?? null, JSON.stringify(ind));
@@ -248,9 +253,10 @@ async function fetchFreshData(env) {
     if (t.tech_symbol && t.tech_symbol !== t.symbol) {
       // 某些指数（如930955）Yahoo只有最新点位、没有历史K线：用跟踪同一指数的ETF补MA200/回撤
       const proxy = await techCN(t.tech_symbol);
-      tech = { ...proxy, current_price: tech.current_price ?? proxy.current_price, source: `${tech.source} / 技术代理 ${t.tech_symbol}` };
+      tech = { ...proxy, current_price: tech.current_price ?? proxy.current_price, day_ohlc: tech.day_ohlc ?? proxy.day_ohlc, source: `${tech.source} / 技术代理 ${t.tech_symbol}` };
     }
     targetsData[t.id].current_price = tech.current_price;
+    targetsData[t.id].day_ohlc = tech.day_ohlc ?? null;
     targetsData[t.id].technical = tech;
   }
 
@@ -312,7 +318,13 @@ export default {
           for (const name of Object.keys(ind)) {
             const iv = ind[name];
             if (!iv || typeof iv !== 'object') continue;
-            (h.indicators[name] ||= []).push({ date: row.date, v: iv.v ?? null, s: iv.s ?? null });
+            // OHLC 字段（价格走势蜡烛图）有则透传，旧快照行保持 {date,v,s}
+            const pt = { date: row.date, v: iv.v ?? null, s: iv.s ?? null };
+            if (iv.o != null) pt.o = iv.o;
+            if (iv.h != null) pt.h = iv.h;
+            if (iv.l != null) pt.l = iv.l;
+            if (iv.d != null) pt.d = iv.d;
+            (h.indicators[name] ||= []).push(pt);
           }
         }
         // 指标元数据（方向 + 解释）全量表：供前端按钮角标与解释区
@@ -323,6 +335,25 @@ export default {
       } catch (e) {
         // 表尚未建立（首次部署）时返回空历史，不阻塞前端
         return json({ success: true, days, history: {}, note: 'score_history 尚未建立' });
+      }
+    }
+
+    // 周/月 K 线（价格走势升级）：按需代理 Yahoo/腾讯 + D1 缓存，不进每日快照
+    if (path === '/api/ohlc') {
+      const target = url.searchParams.get('target') || '';
+      const period = url.searchParams.get('period') || '';
+      const cfg = analyzer.getTargets().find(t => t.id === target);
+      if (!cfg) return error(`unknown target: ${target}`, 400);
+      if (period !== 'weekly' && period !== 'monthly') return error('period must be weekly or monthly', 400);
+      try {
+        const candles = await fetcher.getCachedDaily(
+          env, `ohlc_${target}_${period}`, period === 'weekly' ? 12 : 24,
+          () => fetcher.getOhlcSeries({ symbol: cfg.symbol, techSymbol: cfg.tech_symbol, period }),
+          r => Array.isArray(r) && r.length > 10
+        );
+        return json({ success: true, target, period, candles });
+      } catch (e) {
+        return error(e?.message || 'ohlc fetch failed', 500);
       }
     }
 

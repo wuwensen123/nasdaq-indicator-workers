@@ -103,6 +103,50 @@ test('saveScoreHistory merges current_price as 价格走势 indicator', async ()
   assert.deepEqual(parsed['价格走势'], { v: 689.52, s: null });
 });
 
+test('saveScoreHistory writes OHLC for 价格走势 when day_ohlc present', async () => {
+  const { env, written } = mockD1();
+  const data = {
+    analysis: {
+      results: [{
+        target_id: 'qqq', composite_score: 62, strategy: { multiple: 1 },
+        current_price: 689.52,
+        day_ohlc: { o: 685.1, h: 690.2, l: 684.3, c: 689.52, d: '2026-11-17' },
+        indicators: [],
+      }],
+    },
+  };
+  await saveScoreHistory(env, data, '2026-11-18');
+  const parsed = JSON.parse(written.find(w => w.sql.includes('INSERT OR REPLACE INTO score_history')).args[4]);
+  assert.deepEqual(parsed['价格走势'], { v: 689.52, s: null, o: 685.1, h: 690.2, l: 684.3, d: '2026-11-17' });
+});
+
+test('saveScoreHistory writes price-only when day_ohlc missing', async () => {
+  const { env, written } = mockD1();
+  const data = {
+    analysis: {
+      results: [{
+        target_id: 'qqq', composite_score: 62, strategy: { multiple: 1 },
+        current_price: 689.52, indicators: [],
+      }],
+    },
+  };
+  await saveScoreHistory(env, data, '2026-11-18');
+  const parsed = JSON.parse(written.find(w => w.sql.includes('INSERT OR REPLACE INTO score_history')).args[4]);
+  assert.deepEqual(parsed['价格走势'], { v: 689.52, s: null });
+  assert.equal('o' in parsed['价格走势'], false);
+});
+
+test('backfill writes OHLC for 价格走势 when ohlc present', () => {
+  const ind = addPriceIndicator({}, { price: 689.52 }, { o: 685.1, h: 690.2, l: 684.3, c: 689.52, d: '2026-11-17' });
+  assert.deepEqual(ind['价格走势'], { v: 689.52, s: null, o: 685.1, h: 690.2, l: 684.3, d: '2026-11-17' });
+});
+
+test('backfill writes price-only when ohlc missing', () => {
+  const ind = addPriceIndicator({}, { price: 689.52 }, null);
+  assert.deepEqual(ind['价格走势'], { v: 689.52, s: null });
+  assert.equal('o' in ind['价格走势'], false);
+});
+
 test('backfill skips 价格走势 when target has neither price nor technical close', () => {
   const ind = addPriceIndicator({}, { price: null, technical: { close: null } });
   assert.equal('价格走势' in ind, false);

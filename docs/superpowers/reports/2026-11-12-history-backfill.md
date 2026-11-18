@@ -1,8 +1,21 @@
 # 全部指标 90 天回溯 + 历史回填 验收报告
 
 **日期:** 2026-11-12
-**版本:** v2.9.0（v2.5.1 后补充战术情绪、红利低波估值、价格走势）
-**计划:** [2026-11-12-indicator-history-90d.md](../plans/2026-11-12-indicator-history-90d.md)
+**版本:** v2.10.0（价格走势升级 K 线三周期）
+**计划:** [2026-11-12-indicator-history-90d.md](../plans/2026-11-12-indicator-history-90d.md)、[2026-11-18-kline-three-periods.md](../plans/2026-11-18-kline-three-periods.md)
+
+## 价格走势 K 线升级（v2.10.0）
+
+「90 天指标回溯」的「价格走势」由折线升级为蜡烛 K 线，支持 日K(90天)/周K(52周)/月K(60月) 切换：
+
+- **日K 快照**：`indicators['价格走势'] = { v: close, s: null, o, h, l, d }`；`v` 仍为收盘价（向后兼容），`d` = OHLC 真实交易日（周末/假日 as-of 行 `d` 相同，前端按 `d` 去重）。无 OHLC 时只写 `{v,s:null}`，不造假
+- **周/月K**：新增 `GET /api/ohlc?target&period=weekly|monthly`，按需代理 Yahoo/腾讯前复权 K 线并缓存 D1（key `daily:ohlc_{target}_{period}`，周 12h/月 24h），取末 52 周/60 月；非法 target/period 返回 400，不进每日快照、不影响 cron 子请求预算
+- **标的映射**：`.SS/.SZ` 走腾讯 fqkline（周/月键 `qfqweek|week`、`qfqmonth|month`）；930955 走 `tech_symbol` 563020.SS 代理；QQQ/VOO/GLD/^HSI 走 Yahoo chart
+- **前端**：CDN 引入 chartjs-chart-financial@0.2.1（npm 上兼容 Chart.js 4 的最新版，计划的 4.2.0 不存在）+ chartjs-adapter-date-fns@3.0.0；红涨绿跌（up #dc2626 / down #16a34a / unchanged #9ca3af），MA5/10/20（橙/蓝/紫），不画成交量；tooltip 显示开/高/低/收
+- **降级保护**：旧快照行无 `o/h/l` 时跳过该点；有效点 <2（如 v2.10 前全量旧行）自动回退原折线图，不空白
+- **回填**：全量重跑 2026-08-21 ~ 2026-11-18 共 990 行，11 标的 × 90 天全部带 o/h/l/d；周末 as-of 已验证（qqq 08-22 行 `d=2026-08-21`）；930955 用 563020 代理（~1.2）
+- **验证**：66 个单测全绿；生产 `/api/history` 11 标的各 90 点且全部带 OHLC；`/api/ohlc` qqq weekly 52 / monthly 60、512890 monthly 60、930955 weekly 52；浏览器实测日K 62 根蜡烛（90 日历点补 OHLC 后按 d 去重）、周K 52、月K 60，红涨绿跌逐根采样命中，MA 三色与 tooltip 正常，旧数据降级折线正常
+- 说明：930955 月K 因 563020 上市于 2023-12，实际可用 36 根（接口按末 60 根取，数据不足时返回全部可用）
 
 ## 价格走势回溯（v2.9.0 补充）
 

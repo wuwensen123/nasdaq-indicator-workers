@@ -109,7 +109,7 @@ export class Analyzer {
 
     return {
       target_id: targetId, target_name: cfg.name, target_type: cfg.type, symbol: cfg.symbol,
-      current_price: td.current_price, composite_score: composite, market_position: pos.label,
+      current_price: td.current_price, day_ohlc: td.day_ohlc ?? null, composite_score: composite, market_position: pos.label,
       position_color: pos.color, strategy, indicators,
       formula: `综合评分 = ${cfg.indicators.map(i => `${this._indName(i)}×${cfg.weights[i]*100}%`).join(' + ')}`,
       formula_detail: '0=强烈买入 → 100=强烈卖出，每项指标归一化到0-100分后加权平均',
@@ -185,7 +185,7 @@ export class Analyzer {
     const srcNote = this._valuationNote(cfg, global);
     return {
       target_id: cfg.id, target_name: cfg.name, target_type: cfg.type, symbol: cfg.symbol,
-      current_price: td.current_price, composite_score: composite, market_position: pos.label,
+      current_price: td.current_price, day_ohlc: td.day_ohlc ?? null, composite_score: composite, market_position: pos.label,
       position_color: pos.color, strategy, indicators, tactical, sentiment,
       data_coverage: round(totalWeight * 100, 0),
       formula: `战略评分 = ${cfg.indicators.map(fw).join(' + ')}｜倍数 = 1x底仓 + 估值/回撤加速${cfg.tactical_fg !== false ? `${coeff !== 1 ? ` × 情绪${coeff}` : ''}` : '（无情绪叠加）'}`,
@@ -824,7 +824,7 @@ export class Analyzer {
       roe_level: { name: 'ROE质量估值(PB-ROE)', direction: 'low', desc: 'ROE=PB/PE（价格中性盈利力）；实际PB低于ROE×合理PE隐含的PB=质量调整后便宜（比值越低越便宜）' },
       payout_ratio: { name: '派息率可持续性', direction: 'mid', desc: '派息率=股息率×PE（价格中性）。30-60%为健康区间；>75%有可持续性风险（高分预警）；<20%红利支撑弱' },
       copper_pct: { name: '铜价10年分位', direction: 'low', desc: 'COMEX铜价10年周线分位——周期股的周期位置锚。分位越低=越接近周期底部；高分=周期顶部风险（紫金PE是反向指标，不参与评分）' },
-      price: { name: '价格走势', direction: 'none', desc: '标的每日收盘价（QQQ/VOO/GLD 为美元，A 股/红利低波为人民币；恒生指数为点数，红利低波 930955 用 563020 ETF 代理收盘价）。用于对照估值与趋势，不参与战略评分' },
+      price: { name: '价格走势', direction: 'none', desc: '标的每日收盘价（QQQ/VOO/GLD 为美元，A 股/红利低波为人民币；恒生指数为点数，红利低波 930955 用 563020 ETF 代理收盘价）。红涨绿跌蜡烛图，叠加 MA5/10/20 均线（橙/蓝/紫），支持 日K(90天)/周K(52周)/月K(60月) 切换。用于对照估值与趋势，不参与战略评分' },
     };
     return infos[k] || { name: k, desc: '', direction: 'none' };
   }
