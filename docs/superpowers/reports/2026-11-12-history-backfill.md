@@ -1,8 +1,18 @@
 # 全部指标 90 天回溯 + 历史回填 验收报告
 
 **日期:** 2026-11-12
-**版本:** v2.8.0（v2.5.1 后补充战术情绪、红利低波估值历史）
+**版本:** v2.9.0（v2.5.1 后补充战术情绪、红利低波估值、价格走势）
 **计划:** [2026-11-12-indicator-history-90d.md](../plans/2026-11-12-indicator-history-90d.md)
+
+## 价格走势回溯（v2.9.0 补充）
+
+用户反馈「最近90天没有放上对应指标的价格走势」，已补入：
+
+- **存储**：`score_history.indicators` JSON 新增「价格走势」`{v: 当日收盘价, s: null}`（不参与评分，无得分）；方向 `none`（按钮无方向角标）
+- **生产链路**：`fetchers.getTechnicalIndicators` 的 `current_price` → `targetsData[t.id].current_price` → `analyzeTarget` 透传 `r.current_price` → `saveScoreHistory` 写入；930955 无交易价格，经 `tech_symbol` 代理取 563020 ETF 收盘价
+- **回填**：`scripts/backfill-price.mjs` 的 `addPriceIndicator`（`price ?? technical.close` 兜底，两者皆无则不写，不造假）；全量重跑 2026-08-21 ~ 2026-11-18 共 990 行，11 标的每日均带价格，覆盖 11-13~11-18 cron 旧行
+- **价格口径**：QQQ/VOO/GLD 为美元收盘价，A 股/红利低波为人民币，恒生指数为点数；当日未收盘时取最近收盘（as-of 自然日连续）
+- **验证**：生产 `/api/history` 11 标的各 90 点（08-21~11-18），`indicator_meta['价格走势'] = {direction:'none'}`；浏览器实测 QQQ 按钮行第 12 个「价格走势」无角标，点击后曲线 90 点全渲染（x 39~766 横跨 canvas，蓝色像素 10.9 万，y 轴动态 630~777），解释区显示口径说明；57 个单测全绿
 
 ## 红利低波估值历史回填（v2.8.0 补充）
 

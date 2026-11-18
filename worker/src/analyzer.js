@@ -824,6 +824,7 @@ export class Analyzer {
       roe_level: { name: 'ROE质量估值(PB-ROE)', direction: 'low', desc: 'ROE=PB/PE（价格中性盈利力）；实际PB低于ROE×合理PE隐含的PB=质量调整后便宜（比值越低越便宜）' },
       payout_ratio: { name: '派息率可持续性', direction: 'mid', desc: '派息率=股息率×PE（价格中性）。30-60%为健康区间；>75%有可持续性风险（高分预警）；<20%红利支撑弱' },
       copper_pct: { name: '铜价10年分位', direction: 'low', desc: 'COMEX铜价10年周线分位——周期股的周期位置锚。分位越低=越接近周期底部；高分=周期顶部风险（紫金PE是反向指标，不参与评分）' },
+      price: { name: '价格走势', direction: 'none', desc: '标的每日收盘价（QQQ/VOO/GLD 为美元，A 股/红利低波为人民币；恒生指数为点数，红利低波 930955 用 563020 ETF 代理收盘价）。用于对照估值与趋势，不参与战略评分' },
     };
     return infos[k] || { name: k, desc: '', direction: 'none' };
   }
@@ -841,7 +842,7 @@ export class Analyzer {
         'pe_csi300', 'pe_stock', 'pe_utility', 'pe_mining', 'dividend_yield', 'rsi', 'ma200', 'pe_composite', 'cape',
         'erp', 'erp_real', 'ma200_risk', 'real_yield', 'gold_real_pct', 'dxy_pct', 'pe_pct_hist', 'pb_pct_hist',
         'forward_pe', 'ey_spread_baa', 'erp_hk', 'div_yield_level', 'dy_spread_cn', 'dy_carry', 'stock_pb',
-        'roe_level', 'payout_ratio', 'copper_pct']) {
+        'roe_level', 'payout_ratio', 'copper_pct', 'price']) {
         const info = this._indInfo(key);
         if (info && info.name) map.set(info.name, { direction: info.direction ?? 'none', desc: info.desc });
       }

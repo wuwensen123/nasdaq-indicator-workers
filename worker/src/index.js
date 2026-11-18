@@ -129,6 +129,8 @@ export async function saveScoreHistory(env, data, dateOverride) {
         if (st.fear_greed != null) ind['恐惧与贪婪指数'] = { v: st.fear_greed, s: null };
         if (st.put_call != null) ind['看跌/看涨期权比率'] = { v: st.put_call, s: null };
       }
+      // 价格走势（该标的每日收盘价，供 90 天回溯对照；不参与评分）
+      if (r.current_price != null) ind['价格走势'] = { v: r.current_price, s: null };
       return env.nasdaq_cache.prepare(
         'INSERT OR REPLACE INTO score_history (target_id, date, composite_score, multiple, indicators) VALUES (?, ?, ?, ?, ?)'
       ).bind(r.target_id, date, r.composite_score ?? null, r.strategy?.multiple ?? null, JSON.stringify(ind));

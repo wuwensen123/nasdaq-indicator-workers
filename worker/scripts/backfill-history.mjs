@@ -13,6 +13,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { Analyzer } from '../src/analyzer.js';
+import { addPriceIndicator } from './backfill-price.mjs';
 
 const FRED_KEY = '859dd280f996d8b814f0c4fe9df8e739';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36';
@@ -445,6 +446,8 @@ while (date <= END) {
       if (st.fear_greed != null) ind['恐惧与贪婪指数'] = { v: st.fear_greed, s: null };
       if (st.put_call != null) ind['看跌/看涨期权比率'] = { v: st.put_call, s: null };
     }
+    // 价格走势（与生产 saveScoreHistory 同逻辑；r 无 price 字段，取当日 targetsData）
+    addPriceIndicator(ind, targetsData[r.target_id]);
     rows.push({
       target_id: r.target_id, date,
       composite_score: r.composite_score, multiple: r.strategy?.multiple ?? null,

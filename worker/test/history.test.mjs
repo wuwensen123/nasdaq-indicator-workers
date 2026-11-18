@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { saveScoreHistory } from '../src/index.js';
+import { addPriceIndicator } from '../scripts/backfill-price.mjs';
 
 function mockD1({ historyRows = [] } = {}) {
   const written = [];
@@ -85,6 +86,28 @@ test('saveScoreHistory skips sentiment fields that are null', async () => {
   await saveScoreHistory(env, data, '2026-11-12');
   const parsed = JSON.parse(written.find(w => w.sql.includes('INSERT')).args[4]);
   assert.deepEqual(Object.keys(parsed), ['VIX波动率']);
+});
+
+test('saveScoreHistory merges current_price as 价格走势 indicator', async () => {
+  const { env, written } = mockD1();
+  const data = {
+    analysis: {
+      results: [{
+        target_id: 'qqq', composite_score: 62, strategy: { multiple: 1 },
+        current_price: 689.52, indicators: [], sentiment: { vix: 19.1 },
+      }],
+    },
+  };
+  await saveScoreHistory(env, data, '2026-11-12');
+  const parsed = JSON.parse(written.find(w => w.sql.includes('INSERT OR REPLACE INTO score_history')).args[4]);
+  assert.deepEqual(parsed['价格走势'], { v: 689.52, s: null });
+});
+
+test('backfill skips 价格走势 when target has neither price nor technical close', () => {
+  const ind = addPriceIndicator({}, { price: null, technical: { close: null } });
+  assert.equal('价格走势' in ind, false);
+  const ind2 = addPriceIndicator({}, undefined);
+  assert.equal('价格走势' in ind2, false);
 });
 
 test('saveScoreHistory skips empty results', async () => {
